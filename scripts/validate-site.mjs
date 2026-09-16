@@ -25,17 +25,45 @@ const required = [
   'getPerformance',
   'MAX_PITCH',
   'counterBounds',
+  "from './game-state.js'",
+  'const EYE_HEIGHT = 1.75',
+  "'SeatInteract_1'",
+  "'SeatInteract_4'",
+  "'SafeDoor'",
+  "'SafeDial'",
+  "'SafeNote'",
+  "'SafeInteract'",
+  "event.code === 'KeyF'",
+  "event.code === 'KeyE'",
+  'interactionPrompt',
+  'dialDialog',
+  'inventoryDrawer',
+  'inventoryPreviewRenderer',
+  'createInventoryPreview',
+  'pitchArc',
 ]
 for (const token of required) {
   if (!source.includes(token)) throw new Error(`Missing required feature: ${token}`)
 }
+if (source.includes("button.textContent = '▤'")) {
+  throw new Error('Inventory still uses a character placeholder')
+}
 if (!html.includes('/src/main.js')) throw new Error('Vite entry point is missing')
-if (models.length !== 1 || models[0] !== 'cozy_bar_v004.glb') {
-  throw new Error('public/models must contain only cozy_bar_v004.glb')
+for (const token of [
+  '/models/cozy_bar_v005.glb',
+  'data-action="interact"',
+  'data-action="inventory"',
+  'bar-scene__dial',
+  'bar-scene__inventory',
+]) {
+  if (!html.includes(token)) throw new Error(`Missing interface feature: ${token}`)
+}
+if (models.length !== 1 || models[0] !== 'cozy_bar_v005.glb') {
+  throw new Error('public/models must contain only cozy_bar_v005.glb')
 }
 const modelPath = path.join(modelDir, models[0])
 if ((await stat(modelPath)).size >= 5_000_000) throw new Error('GLB exceeds 5 MB')
-const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v004.glb'))
+const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v005.glb'))
 const packagedModel = await readFile(modelPath)
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex')
 if (digest(sourceModel) !== digest(packagedModel)) throw new Error('Packaged GLB hash mismatch')
