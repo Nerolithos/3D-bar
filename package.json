@@ -1,0 +1,19 @@
+{
+  "name": "3d-bar",
+  "version": "1.0.0",
+  "description": "First-person interactive 3D bar for Cloudflare Pages",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node scripts/validate-site.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  }
+}

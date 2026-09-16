@@ -1,0 +1,106 @@
+:root {
+  color-scheme: dark;
+  --ink: #fff4dc;
+  --muted: #d1aa7b;
+  --ember: #ff7417;
+  --night: #07090d;
+  font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--night);
+}
+
+.bar-scene {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  min-height: 28rem;
+  overflow: hidden;
+  background: linear-gradient(115deg, #101c30eb, #0a0807fa 54%, #2a1105e0);
+  isolation: isolate;
+}
+
+.bar-scene canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.bar-scene__crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border: 1px solid #ffe0b8a6;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.bar-scene.is-active .bar-scene__crosshair { opacity: 1; }
+
+.bar-scene__hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  z-index: 2;
+  margin: 0;
+  padding: .42rem .7rem;
+  border: 1px solid #ffbc703d;
+  background: #06070aad;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  transform: translateX(-50%);
+  transition: opacity 240ms ease;
+}
+
+.bar-scene.has-interacted .bar-scene__hint { opacity: 0; }
+
+.bar-scene__status {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  margin: 0;
+  place-items: center;
+  color: var(--ink);
+  font-size: .8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0;
+  pointer-events: none;
+  transition: opacity 280ms ease;
+}
+
+.bar-scene.is-loaded .bar-scene__status { opacity: 0; }
+
+@media (max-width: 640px) {
+  .bar-scene__hint {
+    bottom: .75rem;
+    max-width: calc(100vw - 1.5rem);
+    white-space: normal;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-scene__hint,
+  .bar-scene__status { transition: none; }
+}
