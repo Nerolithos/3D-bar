@@ -5,6 +5,7 @@ import path from 'node:path'
 const root = path.resolve(import.meta.dirname, '..')
 const source = await readFile(path.join(root, 'src/main.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
+const headers = await readFile(path.join(root, 'public/_headers'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
 const packagedModelName = 'cozy_bar_v005-411bbe69.glb'
@@ -50,6 +51,12 @@ if (source.includes("button.textContent = '▤'")) {
   throw new Error('Inventory still uses a character placeholder')
 }
 if (!html.includes('/src/main.js')) throw new Error('Vite entry point is missing')
+if (!headers.includes("img-src 'self' data: blob:")) {
+  throw new Error('CSP img-src must allow embedded GLB blob textures')
+}
+if (!headers.includes("connect-src 'self' blob:")) {
+  throw new Error('CSP connect-src must allow embedded GLB blob textures')
+}
 for (const token of [
   `/models/${packagedModelName}`,
   'data-action="interact"',
