@@ -7,6 +7,7 @@ const source = await readFile(path.join(root, 'src/main.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
+const packagedModelName = 'cozy_bar_v005-7a643cd5.glb'
 const required = [
   "from 'three'",
   "GLTFLoader",
@@ -50,7 +51,7 @@ if (source.includes("button.textContent = '▤'")) {
 }
 if (!html.includes('/src/main.js')) throw new Error('Vite entry point is missing')
 for (const token of [
-  '/models/cozy_bar_v005.glb',
+  `/models/${packagedModelName}`,
   'data-action="interact"',
   'data-action="inventory"',
   'bar-scene__dial',
@@ -58,8 +59,8 @@ for (const token of [
 ]) {
   if (!html.includes(token)) throw new Error(`Missing interface feature: ${token}`)
 }
-if (models.length !== 1 || models[0] !== 'cozy_bar_v005.glb') {
-  throw new Error('public/models must contain only cozy_bar_v005.glb')
+if (models.length !== 1 || models[0] !== packagedModelName) {
+  throw new Error(`public/models must contain only ${packagedModelName}`)
 }
 const modelPath = path.join(modelDir, models[0])
 if ((await stat(modelPath)).size >= 5_000_000) throw new Error('GLB exceeds 5 MB')

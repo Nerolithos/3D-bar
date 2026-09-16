@@ -383,7 +383,7 @@ function resize() {
   camera.updateProjectionMatrix()
 }
 
-new GLTFLoader().load('/models/cozy_bar_v005.glb', (gltf) => {
+new GLTFLoader().load('/models/cozy_bar_v005-7a643cd5.glb', (gltf) => {
   scene.add(gltf.scene)
   gltf.scene.traverse((object) => {
     if (object.isPointLight) {

@@ -50,6 +50,6 @@ Select **Save and Deploy**. Every later push to `main` creates a production depl
 
 ## Static assets
 
-The versioned model lives at `public/models/cozy_bar_v004.glb`. Cloudflare serves it with a one-year immutable cache through `public/_headers`. When replacing the model, increment the filename and update the path in `src/main.js` so visitors do not receive an old cached GLB.
+The current model lives at `public/models/cozy_bar_v005-7a643cd5.glb`. Cloudflare serves it with a one-year immutable cache through `public/_headers`. The suffix is derived from the GLB SHA-256 digest. Never replace bytes at an existing model URL: after changing the model, update the digest suffix plus the paths in `index.html`, `src/main.js`, and `scripts/validate-site.mjs`.
 
 The lighting rig is implemented in `src/main.js` because glTF does not preserve Blender area lights, world lighting, or Eevee color management. Keep the named `webLightRig` values intact when changing unrelated controls.
