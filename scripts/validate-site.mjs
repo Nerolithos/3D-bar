@@ -7,7 +7,7 @@ const source = await readFile(path.join(root, 'src/main.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
-const packagedModelName = 'cozy_bar_v005-7a643cd5.glb'
+const packagedModelName = 'cozy_bar_v005-411bbe69.glb'
 const required = [
   "from 'three'",
   "GLTFLoader",
