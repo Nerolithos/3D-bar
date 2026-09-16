@@ -199,69 +199,6 @@ body {
   letter-spacing: 0;
 }
 
-.bar-scene__inventory {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  z-index: 6;
-  width: min(31rem, calc(100vw - 1.5rem));
-  height: 10rem;
-  border: 1px solid #9b794c66;
-  border-bottom: 0;
-  border-radius: 7px 7px 0 0;
-  background: #0b0d0bd9;
-  backdrop-filter: blur(12px);
-  transform: translate(-50%, calc(100% - 1rem));
-  transition: transform 260ms ease;
-}
-
-.bar-scene__inventory.is-open { transform: translate(-50%, 0); }
-
-.bar-scene__inventory-handle {
-  display: block;
-  width: 4.5rem;
-  height: 1rem;
-  margin: 0 auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.bar-scene__inventory-handle::after {
-  display: block;
-  width: 2.5rem;
-  height: 3px;
-  margin: .38rem auto 0;
-  border-radius: 2px;
-  background: #d0ae73;
-  content: "";
-}
-
-.bar-scene__inventory-content { padding: .6rem 1rem 1rem; }
-.bar-scene__inventory-title { margin: 0 0 .65rem; color: var(--muted); font-size: .72rem; }
-.bar-scene__inventory-items { min-height: 3rem; }
-
-.bar-scene__inventory-item {
-  width: 4.25rem;
-  height: 4.25rem;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid #b58f5e;
-  border-radius: 4px;
-  background: radial-gradient(circle at 45% 35%, #3b4332, #11150f 72%);
-  cursor: pointer;
-}
-
-.bar-scene__inventory-preview {
-  display: block;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.bar-scene__item-detail { margin: .55rem 0 0; color: var(--ink); font: 600 .9rem/1.2 "Courier New", monospace; }
-
 .bar-scene__mobile-actions {
   position: absolute;
   right: 1rem;
@@ -296,12 +233,10 @@ button:focus-visible { outline: 2px solid #f1c77b; outline-offset: 2px; }
   .bar-scene__dial { min-height: 23rem; }
   .bar-scene__dial-wheel { width: 11.5rem; height: 11.5rem; }
   .bar-scene__mobile-actions { display: flex; }
-  .bar-scene:has(.bar-scene__inventory.is-open) .bar-scene__mobile-actions { bottom: 10.75rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bar-scene__hint,
   .bar-scene__status,
-  .bar-scene__interaction,
-  .bar-scene__inventory { transition: none; }
+  .bar-scene__interaction { transition: none; }
 }

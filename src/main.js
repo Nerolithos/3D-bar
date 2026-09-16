@@ -3,12 +3,20 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js'
 import {
+  collectIceGlass,
   collectNote,
+  collectRevealedNote,
   commitDialDigit,
   createGameState,
-  selectInventoryItem,
-  toggleInventory,
+  insertWetNote,
+  meltHeldGlass,
+  pickupPlacedNote,
+  pickupPlacedGlass,
+  placeHeldGlass,
+  placeHeldNote,
 } from './game-state.js'
+import { createGlassProp } from './glass-prop.js'
+import { NOTE_LAYOUT } from './glass-visual.js'
 
 const host = document.querySelector('.bar-scene')
 const status = document.querySelector('.bar-scene__status')
@@ -18,14 +26,10 @@ const dialDialog = document.querySelector('.bar-scene__dial')
 const dialWheel = document.querySelector('.bar-scene__dial-wheel')
 const dialNumber = document.querySelector('.bar-scene__dial-number')
 const dialSlots = [...document.querySelectorAll('.bar-scene__slots span')]
-const inventoryDrawer = document.querySelector('.bar-scene__inventory')
-const inventoryHandle = document.querySelector('.bar-scene__inventory-handle')
-const inventoryItems = document.querySelector('.bar-scene__inventory-items')
-const itemDetail = document.querySelector('.bar-scene__item-detail')
 const touchMode = matchMedia('(pointer: coarse)').matches
 const maxDpr = touchMode ? 1.25 : 1.5
 
-if (touchMode) hint.textContent = '拖动转头 · 点击地面移动 · F 互动 · E 收集栏'
+if (touchMode) hint.textContent = '拖动转头 · 点击地面移动 · F 互动'
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -109,10 +113,9 @@ let safeNote = null
 let safeDoorBaseY = 0
 let safeDialBaseZ = 0
 let standingPitch = pitch
-let inventoryPreviewRenderer = null
-let inventoryPreviewScene = null
-let inventoryPreviewCamera = null
-let inventoryPreviewModel = null
+let glassProp = null
+let noteHandModel = null
+let revealedNoteHandModel = null
 camera.position.copy(startPosition)
 
 function applyLook() {
@@ -170,66 +173,28 @@ function updateMovement(deltaTime) {
   }
 }
 
-function createInventoryPreview() {
-  if (!safeNote) return null
-  if (!inventoryPreviewRenderer) {
-    inventoryPreviewRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
-    inventoryPreviewRenderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))
-    inventoryPreviewRenderer.setSize(72, 72, false)
-    inventoryPreviewRenderer.outputColorSpace = THREE.SRGBColorSpace
-    inventoryPreviewRenderer.toneMapping = THREE.ACESFilmicToneMapping
-    inventoryPreviewRenderer.toneMappingExposure = 1.15
-    inventoryPreviewRenderer.domElement.className = 'bar-scene__inventory-preview'
-    inventoryPreviewRenderer.domElement.setAttribute('aria-hidden', 'true')
-
-    inventoryPreviewScene = new THREE.Scene()
-    inventoryPreviewScene.add(new THREE.HemisphereLight(0xfff1d0, 0x25291d, 2.4))
-    const keyLight = new THREE.DirectionalLight(0xffd79c, 3.2)
-    keyLight.position.set(-1, 1.5, 2)
-    inventoryPreviewScene.add(keyLight)
-
-    inventoryPreviewCamera = new THREE.PerspectiveCamera(28, 1, .01, 10)
-    inventoryPreviewCamera.position.set(.45, .35, 2.4)
-    inventoryPreviewCamera.lookAt(0, 0, 0)
-
-    inventoryPreviewModel = new THREE.Group()
-    const noteModel = safeNote.clone(true)
-    noteModel.visible = true
-    noteModel.traverse((object) => { object.visible = true })
-    inventoryPreviewModel.add(noteModel)
-    inventoryPreviewScene.add(inventoryPreviewModel)
-    inventoryPreviewModel.updateMatrixWorld(true)
-    const bounds = new THREE.Box3().setFromObject(inventoryPreviewModel)
-    const center = bounds.getCenter(new THREE.Vector3())
-    const size = bounds.getSize(new THREE.Vector3())
-    noteModel.position.sub(center)
-    inventoryPreviewModel.scale.setScalar(1.55 / Math.max(size.x, size.y, size.z))
-    inventoryPreviewModel.rotation.set(-.08, -.18, -.04)
-  }
-  inventoryPreviewRenderer.render(inventoryPreviewScene, inventoryPreviewCamera)
-  return inventoryPreviewRenderer.domElement
-}
-
 function renderGameState() {
   dialSlots.forEach((slot, index) => {
     slot.textContent = gameState.dialDigits[index] ?? '–'
   })
   dialNumber.textContent = String(dialDigit)
-  inventoryDrawer.classList.toggle('is-open', gameState.inventoryOpen)
-  inventoryHandle.setAttribute('aria-expanded', String(gameState.inventoryOpen))
-  inventoryItems.replaceChildren(...gameState.inventory.map((item) => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'bar-scene__inventory-item'
-    button.dataset.itemId = item.id
-    button.title = item.label
-    button.setAttribute('aria-label', item.label)
-    const preview = createInventoryPreview()
-    if (preview) button.append(preview)
-    return button
-  }))
-  const selected = gameState.inventory.find((item) => item.id === gameState.selectedItemId)
-  itemDetail.textContent = selected?.text ?? ''
+  if (safeNote) safeNote.visible = gameState.safeUnlocked && gameState.note.owner === 'safe'
+  syncNoteModel(noteHandModel, gameState.note.text === 'wet')
+  syncNoteModel(revealedNoteHandModel, gameState.note.text === 'CIDER')
+  glassProp?.sync(gameState)
+}
+
+function syncNoteModel(model, matchesText) {
+  if (!model || !glassProp) return
+  const visible = matchesText && ['held', 'placed'].includes(gameState.note.owner)
+  model.visible = visible
+  if (!visible) return
+  const held = gameState.note.owner === 'held'
+  const anchor = held ? camera : glassProp.noteSlotAnchors[gameState.note.slotId]
+  if (model.parent !== anchor) anchor.add(model)
+  model.position.set(held ? -.24 : 0, held ? -.2 : NOTE_LAYOUT.placedOffset, held ? -.48 : 0)
+  model.rotation.set(held ? -1.28 : -Math.PI / 2, 0, -.18)
+  model.scale.setScalar(held ? 1.35 : 1)
 }
 
 function setCameraTransition(destination, onComplete, {
@@ -275,13 +240,41 @@ function findInteractionTarget() {
   camera.getWorldDirection(direction)
   let best = null
   for (const candidate of interactionObjects) {
+    const heldItemId = gameState.heldItemId
+    const allowedWhileHoldingGlass = ['candle', 'glass-slot'].includes(candidate.type)
+    const allowedWhileHoldingNote = candidate.type === 'note-slot' ||
+      (candidate.type === 'glass-placed' && gameState.glass.content === 'water')
+    if (heldItemId === 'glass' && !allowedWhileHoldingGlass) continue
+    if (heldItemId === 'wet-note' && !allowedWhileHoldingNote) continue
+    if (!heldItemId && ['candle', 'glass-slot', 'note-slot'].includes(candidate.type)) continue
     if (candidate.type === 'safe' && gameState.safeUnlocked) continue
-    if (candidate.type === 'note' && (!gameState.safeUnlocked || gameState.noteCollected)) continue
+    if (candidate.type === 'note' && (!gameState.safeUnlocked || gameState.note.owner !== 'safe')) continue
+    if (candidate.type === 'glass-source' && gameState.glass.owner !== 'scene') continue
+    if (candidate.type === 'glass-placed' &&
+      (gameState.glass.owner !== 'placed' || gameState.glass.slotId !== candidate.slotId)) continue
+    if (candidate.type === 'glass-placed' &&
+      gameState.glass.content === 'cider' && !gameState.glass.notePresent) continue
+    if (candidate.type === 'candle' &&
+      (gameState.heldItemId !== 'glass' || gameState.glass.content !== 'ice')) continue
+    if (candidate.type === 'glass-slot' &&
+      (gameState.heldItemId !== 'glass' || gameState.placementSlots[candidate.slotId])) continue
+    if (candidate.type === 'note-slot' &&
+      (gameState.heldItemId !== 'wet-note' || gameState.notePlacementSlots[candidate.slotId])) continue
+    if (candidate.type === 'note-placed' &&
+      (gameState.note.owner !== 'placed' || gameState.note.slotId !== candidate.slotId)) continue
     candidate.object.getWorldPosition(position)
     const offset = position.clone().sub(camera.position)
     const distance = offset.length()
     if (distance > 1.55 || direction.dot(offset.normalize()) < .82) continue
-    if (!best || distance < best.distance) best = { ...candidate, distance }
+    if (!best || distance < best.distance) {
+      let prompt = candidate.prompt
+      if (candidate.type === 'glass-placed' && gameState.glass.content === 'cider') {
+        prompt = 'F 拾取显影纸条'
+      } else if (candidate.type === 'glass-placed' && gameState.heldItemId === 'wet-note') {
+        prompt = 'F 将 wet 纸条放入水中'
+      }
+      best = { ...candidate, prompt, distance }
+    }
   }
   return best
 }
@@ -358,13 +351,23 @@ function performInteraction() {
   if (interactionTarget.type === 'safe') openDial()
   if (interactionTarget.type === 'note') {
     gameState = collectNote(gameState)
-    safeNote.visible = !gameState.noteCollected
-    renderGameState()
   }
-}
-
-function toggleInventoryDrawer() {
-  gameState = toggleInventory(gameState)
+  if (interactionTarget.type === 'glass-source') gameState = collectIceGlass(gameState)
+  if (interactionTarget.type === 'candle') gameState = meltHeldGlass(gameState)
+  if (interactionTarget.type === 'glass-slot') {
+    gameState = placeHeldGlass(gameState, interactionTarget.slotId)
+  }
+  if (interactionTarget.type === 'note-slot') {
+    gameState = placeHeldNote(gameState, interactionTarget.slotId)
+  }
+  if (interactionTarget.type === 'note-placed') {
+    gameState = pickupPlacedNote(gameState)
+  }
+  if (interactionTarget.type === 'glass-placed') {
+    if (gameState.glass.content === 'cider') gameState = collectRevealedNote(gameState)
+    else if (gameState.heldItemId === 'wet-note') gameState = insertWetNote(gameState)
+    else gameState = pickupPlacedGlass(gameState)
+  }
   renderGameState()
 }
 
@@ -397,14 +400,21 @@ new GLTFLoader().load('/models/cozy_bar_v005-411bbe69.glb', (gltf) => {
     if (object.name.startsWith('Floor plank')) floorTargets.push(object)
   })
   const seatNames = ['SeatInteract_1', 'SeatInteract_2', 'SeatInteract_3', 'SeatInteract_4']
-  interactionObjects = seatNames.map((name) => ({
+  interactionObjects.push(...seatNames.map((name) => ({
     type: 'seat',
     object: gltf.scene.getObjectByName(name),
     prompt: 'F 坐下',
-  }))
+  })))
   safeDoor = gltf.scene.getObjectByName('SafeDoor')
   safeDial = gltf.scene.getObjectByName('SafeDial')
   safeNote = gltf.scene.getObjectByName('SafeNote')
+  noteHandModel = safeNote.clone(true)
+  noteHandModel.name = 'WetNoteHandModel'
+  noteHandModel.position.set(-.24, -.2, -.48)
+  noteHandModel.rotation.set(-1.28, 0, -.18)
+  noteHandModel.scale.multiplyScalar(1.35)
+  noteHandModel.visible = false
+  camera.add(noteHandModel)
   interactionObjects.push(
     { type: 'safe', object: gltf.scene.getObjectByName('SafeInteract'), prompt: 'F 使用拨盘' },
     { type: 'note', object: safeNote, prompt: 'F 拾取纸条' },
@@ -416,10 +426,37 @@ new GLTFLoader().load('/models/cozy_bar_v005-411bbe69.glb', (gltf) => {
   shadowFramesRemaining = 2
   host.classList.add('is-loaded')
   status.textContent = '场景已载入'
+  renderGameState()
 }, (event) => {
   if (event.total) status.textContent = `正在进入酒吧... ${Math.round(event.loaded / event.total * 100)}%`
 }, () => {
   status.textContent = '场景载入失败'
+})
+
+createGlassProp(scene, camera).then((controller) => {
+  glassProp = controller
+  revealedNoteHandModel = glassProp.createRevealedNoteModel()
+  revealedNoteHandModel.name = 'RevealedNoteHandModel'
+  revealedNoteHandModel.position.set(-.24, -.2, -.48)
+  revealedNoteHandModel.rotation.z = -.18
+  revealedNoteHandModel.scale.setScalar(1.35)
+  revealedNoteHandModel.visible = false
+  camera.add(revealedNoteHandModel)
+  interactionObjects.push(
+    { type: 'glass-source', object: glassProp.initialAnchor, prompt: 'F 拾取冰酒杯' },
+    { type: 'candle', object: glassProp.candleTarget, prompt: 'F 用烛火融化冰块' },
+    ...Object.entries(glassProp.slotAnchors).flatMap(([slotId, object]) => [
+      { type: 'glass-slot', object, slotId, prompt: 'F 放下酒杯' },
+      { type: 'glass-placed', object, slotId, prompt: 'F 拾起酒杯' },
+    ]),
+    ...Object.entries(glassProp.noteSlotAnchors).flatMap(([slotId, object]) => [
+      { type: 'note-slot', object, slotId, prompt: 'F 放下纸条' },
+      { type: 'note-placed', object, slotId, prompt: 'F 拾起纸条' },
+    ]),
+  )
+  renderGameState()
+}).catch(() => {
+  status.textContent = '互动道具载入失败'
 })
 
 renderer.domElement.addEventListener('click', () => {
@@ -445,11 +482,6 @@ addEventListener('keydown', (event) => {
   if (event.code === 'KeyF') {
     host.classList.add('has-interacted')
     performInteraction()
-    event.preventDefault()
-  }
-  if (event.code === 'KeyE') {
-    host.classList.add('has-interacted')
-    toggleInventoryDrawer()
     event.preventDefault()
   }
   if (event.code === 'Escape' && dialMode) closeDial()
@@ -512,20 +544,9 @@ dialWheel.addEventListener('pointermove', (event) => {
 dialWheel.addEventListener('pointerup', () => { dialDragX = null })
 dialWheel.addEventListener('pointercancel', () => { dialDragX = null })
 document.querySelector('.bar-scene__close').addEventListener('click', closeDial)
-inventoryHandle.addEventListener('click', toggleInventoryDrawer)
-inventoryItems.addEventListener('click', (event) => {
-  const itemId = event.target.closest('[data-item-id]')?.dataset.itemId
-  if (!itemId) return
-  gameState = selectInventoryItem(gameState, itemId)
-  renderGameState()
-})
 document.querySelector('[data-action="interact"]').addEventListener('click', () => {
   host.classList.add('has-interacted')
   performInteraction()
-})
-document.querySelector('[data-action="inventory"]').addEventListener('click', () => {
-  host.classList.add('has-interacted')
-  toggleInventoryDrawer()
 })
 
 new ResizeObserver(resize).observe(host)
@@ -538,6 +559,7 @@ renderer.setAnimationLoop(() => {
   updateCameraTransition(deltaTime)
   updateMovement(deltaTime)
   updateSafeAnimation(deltaTime)
+  glassProp?.update(deltaTime)
   updateInteractionPrompt()
   renderer.render(scene, camera)
   if (shadowFramesRemaining > 0) {
@@ -583,7 +605,6 @@ window.barTour = {
     applyLook()
   },
   interact: performInteraction,
-  toggleInventory: toggleInventoryDrawer,
   setDialDigit: (digit) => {
     dialDigit = ((Math.round(digit) % 10) + 10) % 10
     renderGameState()
