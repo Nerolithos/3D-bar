@@ -2,6 +2,7 @@ import './style.css'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import {
   collectIceGlass,
   collectNote,
@@ -17,6 +18,11 @@ import {
 } from './game-state.js'
 import { createGlassProp } from './glass-prop.js'
 import { NOTE_LAYOUT } from './glass-visual.js'
+import {
+  isCandidateEligible,
+  isShortClick,
+  selectClickTarget,
+} from './click-interactions.js'
 
 const host = document.querySelector('.bar-scene')
 const status = document.querySelector('.bar-scene__status')
@@ -29,7 +35,7 @@ const dialSlots = [...document.querySelectorAll('.bar-scene__slots span')]
 const touchMode = matchMedia('(pointer: coarse)').matches
 const maxDpr = touchMode ? 1.25 : 1.5
 
-if (touchMode) hint.textContent = '拖动转头 · 点击地面移动 · F 互动'
+if (touchMode) hint.textContent = '点击物品互动 · 拖动转头 · 点击地面移动'
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -84,6 +90,7 @@ const EYE_HEIGHT = 1.75
 const MAX_PITCH = THREE.MathUtils.degToRad(70)
 const roomBounds = { minX: -3.72, maxX: 3.72, minZ: -2.72, maxZ: 2.72 }
 const counterBounds = { minX: -2.05, maxX: 3.62, minZ: -1.82, maxZ: -.15 }
+const MAX_INTERACTION_DISTANCE = 1.75
 const playerRadius = .2
 const movementSpeed = 2.8
 const keys = new Set()
@@ -95,11 +102,13 @@ let yaw = 0
 let pitch = .08
 let walkTarget = null
 let floorTargets = []
-let touchStart = null
+let occlusionObjects = []
+let interactionHitObjects = []
+let pointerGesture = null
+let pointerPosition = null
 let shadowFramesRemaining = 2
 let gameState = createGameState()
 let interactionTarget = null
-let interactionObjects = []
 let seatedAt = null
 let standingReturn = null
 let cameraTransition = null
@@ -152,6 +161,31 @@ function lookBy(deltaYaw, deltaPitch) {
   yaw += deltaYaw
   pitch = THREE.MathUtils.clamp(pitch + deltaPitch, -MAX_PITCH, MAX_PITCH)
   applyLook()
+}
+
+const hitProxyMaterial = new THREE.MeshBasicMaterial({
+  transparent: true,
+  opacity: 0,
+  depthWrite: false,
+  colorWrite: false,
+})
+
+function registerInteraction(candidate, size, offset = [0, 0, 0]) {
+  let proxy = candidate.object.userData.clickProxy
+  if (!proxy) {
+    const scale = touchMode ? 1.25 : 1
+    proxy = new THREE.Mesh(
+      new THREE.BoxGeometry(size[0] * scale, size[1] * scale, size[2] * scale),
+      hitProxyMaterial,
+    )
+    proxy.name = `${candidate.object.name}_ClickTarget`
+    proxy.position.fromArray(offset)
+    proxy.userData.interactionCandidates = []
+    candidate.object.add(proxy)
+    candidate.object.userData.clickProxy = proxy
+    interactionHitObjects.push(proxy)
+  }
+  proxy.userData.interactionCandidates.push(candidate)
 }
 
 function updateMovement(deltaTime) {
@@ -231,58 +265,52 @@ function updateCameraTransition(deltaTime) {
   onComplete?.()
 }
 
-function findInteractionTarget() {
-  if (dialMode || cameraTransition) return null
-  if (seatedAt) return { type: 'stand', object: seatedAt, prompt: 'F 起身' }
-
-  const direction = new THREE.Vector3()
-  const position = new THREE.Vector3()
-  camera.getWorldDirection(direction)
-  let best = null
-  for (const candidate of interactionObjects) {
-    const heldItemId = gameState.heldItemId
-    const allowedWhileHoldingGlass = ['candle', 'glass-slot'].includes(candidate.type)
-    const allowedWhileHoldingNote = candidate.type === 'note-slot' ||
-      (candidate.type === 'glass-placed' && gameState.glass.content === 'water')
-    if (heldItemId === 'glass' && !allowedWhileHoldingGlass) continue
-    if (heldItemId === 'wet-note' && !allowedWhileHoldingNote) continue
-    if (!heldItemId && ['candle', 'glass-slot', 'note-slot'].includes(candidate.type)) continue
-    if (candidate.type === 'safe' && gameState.safeUnlocked) continue
-    if (candidate.type === 'note' && (!gameState.safeUnlocked || gameState.note.owner !== 'safe')) continue
-    if (candidate.type === 'glass-source' && gameState.glass.owner !== 'scene') continue
-    if (candidate.type === 'glass-placed' &&
-      (gameState.glass.owner !== 'placed' || gameState.glass.slotId !== candidate.slotId)) continue
-    if (candidate.type === 'glass-placed' &&
-      gameState.glass.content === 'cider' && !gameState.glass.notePresent) continue
-    if (candidate.type === 'candle' &&
-      (gameState.heldItemId !== 'glass' || gameState.glass.content !== 'ice')) continue
-    if (candidate.type === 'glass-slot' &&
-      (gameState.heldItemId !== 'glass' || gameState.placementSlots[candidate.slotId])) continue
-    if (candidate.type === 'note-slot' &&
-      (gameState.heldItemId !== 'wet-note' || gameState.notePlacementSlots[candidate.slotId])) continue
-    if (candidate.type === 'note-placed' &&
-      (gameState.note.owner !== 'placed' || gameState.note.slotId !== candidate.slotId)) continue
-    candidate.object.getWorldPosition(position)
-    const offset = position.clone().sub(camera.position)
-    const distance = offset.length()
-    if (distance > 1.55 || direction.dot(offset.normalize()) < .82) continue
-    if (!best || distance < best.distance) {
-      let prompt = candidate.prompt
-      if (candidate.type === 'glass-placed' && gameState.glass.content === 'cider') {
-        prompt = 'F 拾取显影纸条'
-      } else if (candidate.type === 'glass-placed' && gameState.heldItemId === 'wet-note') {
-        prompt = 'F 将 wet 纸条放入水中'
-      }
-      best = { ...candidate, prompt, distance }
-    }
-  }
-  return best
+function setPointerFromEvent(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect()
+  pointer.set(
+    (clientX - rect.left) / rect.width * 2 - 1,
+    -(clientY - rect.top) / rect.height * 2 + 1,
+  )
 }
 
-function updateInteractionPrompt() {
-  interactionTarget = findInteractionTarget()
-  interactionPrompt.textContent = interactionTarget?.prompt ?? ''
+function promptFor(candidate) {
+  if (!candidate) return ''
+  if (candidate.type === 'glass-placed' && gameState.glass.content === 'cider') {
+    return '点击拾取显影纸条'
+  }
+  if (candidate.type === 'glass-placed' && gameState.heldItemId === 'wet-note') {
+    return '点击将 wet 纸条放入水中'
+  }
+  return candidate.prompt
+}
+
+function findInteractionTarget(clientX, clientY) {
+  if (dialMode || cameraTransition) return null
+  if (seatedAt) return { type: 'stand', object: seatedAt, prompt: '点击起身' }
+  if (touchMode) setPointerFromEvent(clientX, clientY)
+  else pointer.set(0, 0)
+  raycaster.setFromCamera(pointer, camera)
+  const hits = raycaster.intersectObjects([...interactionHitObjects, ...occlusionObjects], false)
+    .map((hit) => hit.object.userData.interactionCandidates
+      ? { distance: hit.distance, candidates: hit.object.userData.interactionCandidates }
+      : { distance: hit.distance, blocksInteraction: true })
+  return selectClickTarget(hits, gameState, MAX_INTERACTION_DISTANCE)
+}
+
+function updateInteractionPrompt(clientX = pointerPosition?.x, clientY = pointerPosition?.y) {
+  const desktopActive = !touchMode && document.pointerLockElement === renderer.domElement
+  if (desktopActive || (touchMode && clientX !== undefined && clientY !== undefined)) {
+    interactionTarget = findInteractionTarget(clientX, clientY)
+    const promptX = desktopActive ? host.clientWidth / 2 : clientX
+    const promptY = desktopActive ? host.clientHeight / 2 : clientY
+    interactionPrompt.style.setProperty('--prompt-x', `${promptX}px`)
+    interactionPrompt.style.setProperty('--prompt-y', `${promptY}px`)
+  } else {
+    interactionTarget = null
+  }
+  interactionPrompt.textContent = promptFor(interactionTarget)
   interactionPrompt.classList.toggle('is-visible', Boolean(interactionTarget))
+  host.classList.toggle('has-click-target', Boolean(interactionTarget))
 }
 
 function sitDown(seat) {
@@ -307,7 +335,7 @@ function standUp() {
     targetPitch: standingPitch,
     pitchArc: .07,
   })
-  interactionTarget = { type: 'seat', object: seat, prompt: 'F 坐下' }
+  interactionTarget = { type: 'seat', object: seat, prompt: '点击坐下' }
 }
 
 function openDial() {
@@ -340,35 +368,36 @@ function commitCurrentDigit() {
   renderGameState()
 }
 
-function performInteraction() {
+function performInteraction(target = interactionTarget) {
   if (dialMode) {
     commitCurrentDigit()
     return
   }
-  if (!interactionTarget) return
-  if (interactionTarget.type === 'seat') sitDown(interactionTarget.object)
-  if (interactionTarget.type === 'stand') standUp()
-  if (interactionTarget.type === 'safe') openDial()
-  if (interactionTarget.type === 'note') {
+  if (!target || !isCandidateEligible(target, gameState)) return
+  if (target.type === 'seat') sitDown(target.object)
+  if (target.type === 'stand') standUp()
+  if (target.type === 'safe') openDial()
+  if (target.type === 'note') {
     gameState = collectNote(gameState)
   }
-  if (interactionTarget.type === 'glass-source') gameState = collectIceGlass(gameState)
-  if (interactionTarget.type === 'candle') gameState = meltHeldGlass(gameState)
-  if (interactionTarget.type === 'glass-slot') {
-    gameState = placeHeldGlass(gameState, interactionTarget.slotId)
+  if (target.type === 'glass-source') gameState = collectIceGlass(gameState)
+  if (target.type === 'candle') gameState = meltHeldGlass(gameState)
+  if (target.type === 'glass-slot') {
+    gameState = placeHeldGlass(gameState, target.slotId)
   }
-  if (interactionTarget.type === 'note-slot') {
-    gameState = placeHeldNote(gameState, interactionTarget.slotId)
+  if (target.type === 'note-slot') {
+    gameState = placeHeldNote(gameState, target.slotId)
   }
-  if (interactionTarget.type === 'note-placed') {
+  if (target.type === 'note-placed') {
     gameState = pickupPlacedNote(gameState)
   }
-  if (interactionTarget.type === 'glass-placed') {
+  if (target.type === 'glass-placed') {
     if (gameState.glass.content === 'cider') gameState = collectRevealedNote(gameState)
     else if (gameState.heldItemId === 'wet-note') gameState = insertWetNote(gameState)
     else gameState = pickupPlacedGlass(gameState)
   }
   renderGameState()
+  updateInteractionPrompt()
 }
 
 function updateSafeAnimation(deltaTime) {
@@ -386,7 +415,9 @@ function resize() {
   camera.updateProjectionMatrix()
 }
 
-new GLTFLoader().load('/models/cozy_bar_v005-411bbe69.glb', (gltf) => {
+const roomLoader = new GLTFLoader()
+roomLoader.setMeshoptDecoder(MeshoptDecoder)
+roomLoader.load('/models/cozy_bar_v006-bc7e3e2b.glb', (gltf) => {
   scene.add(gltf.scene)
   gltf.scene.traverse((object) => {
     if (object.isPointLight) {
@@ -397,14 +428,15 @@ new GLTFLoader().load('/models/cozy_bar_v005-411bbe69.glb', (gltf) => {
     if (!object.isMesh) return
     object.castShadow = true
     object.receiveShadow = true
+    occlusionObjects.push(object)
     if (object.name.startsWith('Floor plank')) floorTargets.push(object)
   })
   const seatNames = ['SeatInteract_1', 'SeatInteract_2', 'SeatInteract_3', 'SeatInteract_4']
-  interactionObjects.push(...seatNames.map((name) => ({
+  seatNames.forEach((name) => registerInteraction({
     type: 'seat',
     object: gltf.scene.getObjectByName(name),
-    prompt: 'F 坐下',
-  })))
+    prompt: '点击坐下',
+  }, [.66, .18, .66], [0, -.915, 0]))
   safeDoor = gltf.scene.getObjectByName('SafeDoor')
   safeDial = gltf.scene.getObjectByName('SafeDial')
   safeNote = gltf.scene.getObjectByName('SafeNote')
@@ -415,10 +447,11 @@ new GLTFLoader().load('/models/cozy_bar_v005-411bbe69.glb', (gltf) => {
   noteHandModel.scale.multiplyScalar(1.35)
   noteHandModel.visible = false
   camera.add(noteHandModel)
-  interactionObjects.push(
-    { type: 'safe', object: gltf.scene.getObjectByName('SafeInteract'), prompt: 'F 使用拨盘' },
-    { type: 'note', object: safeNote, prompt: 'F 拾取纸条' },
+  registerInteraction(
+    { type: 'safe', object: gltf.scene.getObjectByName('SafeInteract'), prompt: '点击使用拨盘' },
+    [.86, .92, .28],
   )
+  registerInteraction({ type: 'note', object: safeNote, prompt: '点击拾取纸条' }, [.38, .06, .24])
   safeDoorBaseY = safeDoor.rotation.y
   safeDialBaseZ = safeDial.rotation.z
   renderer.shadowMap.autoUpdate = true
@@ -442,46 +475,33 @@ createGlassProp(scene, camera).then((controller) => {
   revealedNoteHandModel.scale.setScalar(1.35)
   revealedNoteHandModel.visible = false
   camera.add(revealedNoteHandModel)
-  interactionObjects.push(
-    { type: 'glass-source', object: glassProp.initialAnchor, prompt: 'F 拾取冰酒杯' },
-    { type: 'candle', object: glassProp.candleTarget, prompt: 'F 用烛火融化冰块' },
-    ...Object.entries(glassProp.slotAnchors).flatMap(([slotId, object]) => [
-      { type: 'glass-slot', object, slotId, prompt: 'F 放下酒杯' },
-      { type: 'glass-placed', object, slotId, prompt: 'F 拾起酒杯' },
-    ]),
-    ...Object.entries(glassProp.noteSlotAnchors).flatMap(([slotId, object]) => [
-      { type: 'note-slot', object, slotId, prompt: 'F 放下纸条' },
-      { type: 'note-placed', object, slotId, prompt: 'F 拾起纸条' },
-    ]),
+  registerInteraction(
+    { type: 'glass-source', object: glassProp.initialAnchor, prompt: '点击拾取冰酒杯' },
+    [.22, .35, .22],
+    [0, .155, 0],
   )
+  registerInteraction(
+    { type: 'candle', object: glassProp.candleTarget, prompt: '点击用烛火融化冰块' },
+    [.2, .32, .2],
+    [0, -.02, 0],
+  )
+  Object.entries(glassProp.slotAnchors).forEach(([slotId, object]) => {
+    registerInteraction({ type: 'glass-slot', object, slotId, prompt: '点击放下酒杯' }, [.34, .12, .34], [0, .04, 0])
+    registerInteraction({ type: 'glass-placed', object, slotId, prompt: '点击拾起酒杯' }, [.34, .34, .34], [0, .16, 0])
+  })
+  Object.entries(glassProp.noteSlotAnchors).forEach(([slotId, object]) => {
+    registerInteraction({ type: 'note-slot', object, slotId, prompt: '点击放下纸条' }, [.3, .08, .22], [0, .03, 0])
+    registerInteraction({ type: 'note-placed', object, slotId, prompt: '点击拾起纸条' }, [.3, .08, .22], [0, .03, 0])
+  })
   renderGameState()
 }).catch(() => {
   status.textContent = '互动道具载入失败'
 })
 
-renderer.domElement.addEventListener('click', () => {
-  if (!touchMode && !dialMode) renderer.domElement.requestPointerLock()
-})
-document.addEventListener('pointerlockchange', () => {
-  const active = document.pointerLockElement === renderer.domElement
-  host.classList.toggle('is-active', active)
-  if (active) host.classList.add('has-interacted')
-})
-document.addEventListener('mousemove', (event) => {
-  if (document.pointerLockElement === renderer.domElement) {
-    lookBy(-event.movementX * .002, -event.movementY * .002)
-  }
-})
 addEventListener('keydown', (event) => {
   if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
     keys.add(event.code)
     host.classList.add('has-interacted')
-    event.preventDefault()
-  }
-  if (event.repeat) return
-  if (event.code === 'KeyF') {
-    host.classList.add('has-interacted')
-    performInteraction()
     event.preventDefault()
   }
   if (event.code === 'Escape' && dialMode) closeDial()
@@ -490,7 +510,7 @@ addEventListener('keyup', (event) => keys.delete(event.code))
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (event.pointerType !== 'touch') return
-  touchStart = {
+  pointerGesture = {
     x: event.clientX,
     y: event.clientY,
     lastX: event.clientX,
@@ -500,33 +520,74 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   renderer.domElement.setPointerCapture(event.pointerId)
 })
 renderer.domElement.addEventListener('pointermove', (event) => {
-  if (!touchStart || event.pointerType !== 'touch') return
-  const dx = event.clientX - touchStart.lastX
-  const dy = event.clientY - touchStart.lastY
-  if (Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y) > 8) {
-    touchStart.moved = true
+  if (event.pointerType !== 'touch') return
+  pointerPosition = { x: event.clientX, y: event.clientY }
+  if (!pointerGesture) {
+    updateInteractionPrompt(event.clientX, event.clientY)
+    return
   }
-  if (touchStart.moved) lookBy(-dx * .005, -dy * .005)
-  touchStart.lastX = event.clientX
-  touchStart.lastY = event.clientY
+  const dx = event.clientX - pointerGesture.lastX
+  const dy = event.clientY - pointerGesture.lastY
+  if (!isShortClick(pointerGesture, event, 8)) pointerGesture.moved = true
+  if (pointerGesture.moved) {
+    host.classList.add('is-dragging')
+    lookBy(-dx * .005, -dy * .005)
+  }
+  pointerGesture.lastX = event.clientX
+  pointerGesture.lastY = event.clientY
   host.classList.add('has-interacted')
 })
 renderer.domElement.addEventListener('pointerup', (event) => {
-  if (!touchStart || event.pointerType !== 'touch') return
-  if (!touchStart.moved && floorTargets.length && !seatedAt && !cameraTransition && !dialMode) {
-    const rect = renderer.domElement.getBoundingClientRect()
-    pointer.set(
-      (event.clientX - rect.left) / rect.width * 2 - 1,
-      -(event.clientY - rect.top) / rect.height * 2 + 1,
-    )
-    raycaster.setFromCamera(pointer, camera)
+  if (event.pointerType !== 'touch') return
+  if (!pointerGesture) return
+  const clicked = !pointerGesture.moved && isShortClick(pointerGesture, event, 8)
+  pointerGesture = null
+  host.classList.remove('is-dragging')
+  pointerPosition = { x: event.clientX, y: event.clientY }
+  if (clicked && !dialMode) {
+    const target = findInteractionTarget(event.clientX, event.clientY)
+    if (target) {
+      performInteraction(target)
+    } else if (floorTargets.length && !seatedAt && !cameraTransition) {
+      setPointerFromEvent(event.clientX, event.clientY)
+      raycaster.setFromCamera(pointer, camera)
     const hit = raycaster.intersectObjects(floorTargets, false)[0]
     if (hit) {
       const target = clampPosition(new THREE.Vector3(hit.point.x, EYE_HEIGHT, hit.point.z))
       if (!hitsCounter(target)) walkTarget = target
     }
+    }
   }
-  touchStart = null
+  updateInteractionPrompt(event.clientX, event.clientY)
+})
+renderer.domElement.addEventListener('pointerleave', () => {
+  if (!touchMode) return
+  if (!pointerGesture) {
+    pointerPosition = null
+    updateInteractionPrompt()
+  }
+})
+renderer.domElement.addEventListener('pointercancel', () => {
+  if (!touchMode) return
+  pointerGesture = null
+  host.classList.remove('is-dragging')
+})
+
+renderer.domElement.addEventListener('click', () => {
+  if (touchMode || dialMode) return
+  if (document.pointerLockElement !== renderer.domElement) {
+    renderer.domElement.requestPointerLock()
+    return
+  }
+  performInteraction(findInteractionTarget())
+})
+document.addEventListener('pointerlockchange', () => {
+  host.classList.toggle('is-active', document.pointerLockElement === renderer.domElement)
+  updateInteractionPrompt()
+})
+document.addEventListener('mousemove', (event) => {
+  if (document.pointerLockElement !== renderer.domElement) return
+  lookBy(-event.movementX * .002, -event.movementY * .002)
 })
 
 dialWheel.addEventListener('pointerdown', (event) => {
@@ -544,10 +605,7 @@ dialWheel.addEventListener('pointermove', (event) => {
 dialWheel.addEventListener('pointerup', () => { dialDragX = null })
 dialWheel.addEventListener('pointercancel', () => { dialDragX = null })
 document.querySelector('.bar-scene__close').addEventListener('click', closeDial)
-document.querySelector('[data-action="interact"]').addEventListener('click', () => {
-  host.classList.add('has-interacted')
-  performInteraction()
-})
+document.querySelector('[data-action="dial-commit"]').addEventListener('click', commitCurrentDigit)
 
 new ResizeObserver(resize).observe(host)
 applyLook()
@@ -560,7 +618,7 @@ renderer.setAnimationLoop(() => {
   updateMovement(deltaTime)
   updateSafeAnimation(deltaTime)
   glassProp?.update(deltaTime)
-  updateInteractionPrompt()
+  if (!touchMode) updateInteractionPrompt()
   renderer.render(scene, camera)
   if (shadowFramesRemaining > 0) {
     shadowFramesRemaining -= 1

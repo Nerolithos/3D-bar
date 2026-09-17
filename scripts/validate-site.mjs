@@ -10,7 +10,7 @@ const html = await readFile(path.join(root, 'index.html'), 'utf8')
 const headers = await readFile(path.join(root, 'public/_headers'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
-const packagedModelName = 'cozy_bar_v005-411bbe69.glb'
+const packagedModelName = 'cozy_bar_v006-bc7e3e2b.glb'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
   'wine_glass-70854faa.glb',
@@ -41,7 +41,6 @@ const required = [
   "'SafeDial'",
   "'SafeNote'",
   "'SafeInteract'",
-  "event.code === 'KeyF'",
   'interactionPrompt',
   'dialDialog',
   'pitchArc',
@@ -54,11 +53,28 @@ const required = [
   'placeHeldNote',
   'pickupPlacedNote',
   'document.exitPointerLock()',
+  'renderer.domElement.requestPointerLock()',
+  "document.pointerLockElement === renderer.domElement",
+  'pointer.set(0, 0)',
+  "event.pointerType !== 'touch'",
+  "from './click-interactions.js'",
+  'isShortClick',
+  'selectClickTarget',
+  'raycaster.setFromCamera(pointer, camera)',
+  'event.clientX',
+  'event.clientY',
 ]
 for (const token of required) {
   if (!source.includes(token)) throw new Error(`Missing required feature: ${token}`)
 }
-for (const token of ['inventory', 'KeyE', 'toggleInventory', 'equipItem']) {
+for (const token of [
+  'inventory',
+  'KeyE',
+  'KeyF',
+  'toggleInventory',
+  'equipItem',
+  "prompt: 'F ",
+]) {
   if (source.includes(token) || html.includes(token)) {
     throw new Error(`Removed inventory feature remains: ${token}`)
   }
@@ -72,20 +88,30 @@ if (!headers.includes("connect-src 'self' blob:")) {
 }
 for (const token of [
   `/models/${packagedModelName}`,
-  'data-action="interact"',
   'bar-scene__dial',
+  'data-action="dial-commit"',
 ]) {
   if (!html.includes(token)) throw new Error(`Missing interface feature: ${token}`)
 }
-if (models.length !== 2 || !models.includes(packagedModelName) || !models.includes('interactive')) {
-  throw new Error('public/models must contain the packaged room and interactive assets')
+for (const token of ['data-action="interact"', '>F<']) {
+  if (html.includes(token)) throw new Error(`Removed F interaction UI remains: ${token}`)
+}
+if (!html.includes('bar-scene__crosshair')) throw new Error('Center aim cursor is missing')
+if (!models.includes(packagedModelName) || !models.includes('interactive')) {
+  throw new Error('public/models must contain the packaged v006 room and interactive assets')
 }
 const modelPath = path.join(modelDir, packagedModelName)
 if ((await stat(modelPath)).size >= 5_000_000) throw new Error('GLB exceeds 5 MB')
-const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v005.glb'))
+const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v006.glb'))
 const packagedModel = await readFile(modelPath)
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex')
 if (digest(sourceModel) !== digest(packagedModel)) throw new Error('Packaged GLB hash mismatch')
+if (source.includes('cozy_bar_v005') || html.includes('cozy_bar_v005')) {
+  throw new Error('Application still references the stale v005 room model')
+}
+if (!source.includes('MeshoptDecoder') || !source.includes('setMeshoptDecoder')) {
+  throw new Error('Meshopt-compressed room is missing its decoder configuration')
+}
 
 const interactiveDir = path.join(modelDir, 'interactive')
 const interactiveModels = (await readdir(interactiveDir)).sort()

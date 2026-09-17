@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#07090d">
     <meta name="description" content="Lithos' Bar 第一人称三维场景">
-    <link rel="preload" href="/models/cozy_bar_v005-411bbe69.glb" as="fetch" crossorigin>
+    <link rel="preload" href="/models/cozy_bar_v006-bc7e3e2b.glb" as="fetch" crossorigin>
     <title>Lithos' Bar 3D</title>
   </head>
   <body>
     <main class="bar-scene" aria-label="Lithos' Bar 第一人称三维场景">
       <p class="bar-scene__status" role="status">正在进入酒吧...</p>
       <span class="bar-scene__crosshair" aria-hidden="true"></span>
-      <p class="bar-scene__hint">点击进入 · WASD 移动 · 鼠标转头 · Esc 退出</p>
+      <p class="bar-scene__hint">点击进入 · 鼠标转头 · 准星对准后点击互动 · WASD 移动</p>
       <p class="bar-scene__interaction" aria-live="polite"></p>
       <section class="bar-scene__dial" role="dialog" aria-modal="true" aria-label="机械保险箱拨盘" hidden>
         <button class="bar-scene__close" type="button" aria-label="关闭拨盘">×</button>
@@ -20,13 +20,10 @@
           <span>–</span><span>–</span><span>–</span>
         </div>
         <div class="bar-scene__dial-wheel" aria-hidden="true">
-          <span class="bar-scene__dial-number">0</span>
+          <button class="bar-scene__dial-number" type="button" data-action="dial-commit" aria-label="锁定当前数字">0</button>
         </div>
-        <p class="bar-scene__dial-help">左右拖动 · F 锁定 · × 返回</p>
+        <p class="bar-scene__dial-help">左右拖动 · 点击中央锁定 · × 返回</p>
       </section>
-      <div class="bar-scene__mobile-actions" aria-label="触控操作">
-        <button type="button" data-action="interact">F</button>
-      </div>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
