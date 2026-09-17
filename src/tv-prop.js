@@ -5,11 +5,13 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import {
   TV_ANOMALY_BRIGHTNESS,
   TV_CHANNELS,
+  TV_INITIAL_CHANNEL,
   TV_NORMAL_BRIGHTNESS,
   chooseNextTvDisplay,
 } from './tv-display.js'
 
 const TV_URL = '/models/interactive/tv-9d401ae2.glb'
+const HANDPRINT_URL = '/textures/tv-handprint-b6082550.jpg'
 const DISPLAY_WIDTH = 512
 const DISPLAY_HEIGHT = 320
 
@@ -167,52 +169,58 @@ function drawHumanPeeler(context) {
   context.fillText('666-4514', 320, 274)
 }
 
-function drawHandprintStatic(context) {
-  const glow = context.createRadialGradient(275, 155, 18, 275, 155, 310)
-  glow.addColorStop(0, '#eafcff')
-  glow.addColorStop(.38, '#b9e8f4')
-  glow.addColorStop(.72, '#5b9db5')
-  glow.addColorStop(1, '#193746')
-  context.fillStyle = glow
+function drawOptometryScene(context) {
+  context.fillStyle = '#030504'
   context.fillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT)
-  for (let y = 0; y < DISPLAY_HEIGHT; y += 4) {
-    for (let x = 0; x < DISPLAY_WIDTH; x += 4) {
-      const value = 18 + ((x * 19 + y * 31 + (x ^ y) * 11) % 54)
-      context.fillStyle = `rgba(${value},${value + 15},${value + 22},.2)`
-      context.fillRect(x, y, 3, 3)
-    }
-  }
-  context.fillStyle = 'rgba(8, 25, 37, .13)'
-  for (let y = 7; y < DISPLAY_HEIGHT; y += 11) context.fillRect(0, y, DISPLAY_WIDTH, 2)
+  context.save()
+  context.beginPath()
+  context.arc(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 148, 0, Math.PI * 2)
+  context.clip()
 
-  const fingers = [
-    [-62, -38, 17, 67, -.2],
-    [-31, -70, 18, 82, -.1],
-    [3, -79, 19, 88, 0],
-    [38, -65, 18, 80, .12],
-    [72, -35, 16, 66, .34],
-  ]
-  for (const [blur, alpha, scale] of [[20, .12, 1.1], [10, .24, 1.04], [3, .83, 1]]) {
-    context.save()
-    context.translate(278, 178)
-    context.rotate(-.15)
-    context.scale(scale, scale)
-    context.filter = `blur(${blur}px)`
-    context.fillStyle = `rgba(2, 28, 68, ${alpha})`
+  const sky = context.createLinearGradient(0, 12, 0, 175)
+  sky.addColorStop(0, '#3185ce')
+  sky.addColorStop(1, '#90cbed')
+  context.fillStyle = sky
+  context.fillRect(100, 0, 312, 174)
+
+  const field = context.createLinearGradient(0, 164, 0, 320)
+  field.addColorStop(0, '#6eb44c')
+  field.addColorStop(1, '#38852f')
+  context.fillStyle = field
+  context.fillRect(95, 164, 322, 156)
+  context.strokeStyle = 'rgba(31, 91, 37, .72)'
+  context.lineWidth = 3
+  for (let x = 104; x <= 408; x += 24) {
     context.beginPath()
-    context.ellipse(0, 35, 69, 78, 0, 0, Math.PI * 2)
-    context.fill()
-    for (const [x, y, radiusX, radiusY, rotation] of fingers) {
-      context.beginPath()
-      context.ellipse(x, y, radiusX, radiusY, rotation, 0, Math.PI * 2)
-      context.fill()
-    }
-    context.restore()
+    context.moveTo(256, 168)
+    context.lineTo(x, 320)
+    context.stroke()
   }
+  context.strokeStyle = 'rgba(156, 201, 91, .48)'
+  context.lineWidth = 2
+  for (let y = 188; y < 320; y += 18) {
+    context.beginPath()
+    context.moveTo(100, y)
+    context.lineTo(412, y)
+    context.stroke()
+  }
+
+  context.fillStyle = '#f5f1df'
+  context.fillRect(240, 149, 34, 22)
+  context.fillStyle = '#d72524'
+  context.beginPath()
+  context.moveTo(235, 151)
+  context.lineTo(257, 133)
+  context.lineTo(280, 151)
+  context.closePath()
+  context.fill()
+  context.fillStyle = '#4a392c'
+  context.fillRect(254, 158, 7, 13)
+  context.restore()
 }
 
-function createChannelTextures() {
-  const painters = [drawCiderAdvertisement, drawColorBars, drawBarIdent, drawHumanPeeler]
+async function createChannelTextures() {
+  const painters = [drawCiderAdvertisement, drawColorBars, drawBarIdent, drawHumanPeeler, drawOptometryScene]
   const textures = painters.map((paint, index) => {
     const canvas = createCanvas()
     const context = canvas.getContext('2d')
@@ -223,9 +231,8 @@ function createChannelTextures() {
     texture.anisotropy = 4
     return texture
   })
-  const anomalyCanvas = createCanvas()
-  drawHandprintStatic(anomalyCanvas.getContext('2d'))
-  const anomalyTexture = new THREE.CanvasTexture(anomalyCanvas)
+  const textureLoader = new THREE.TextureLoader()
+  const anomalyTexture = await textureLoader.loadAsync(HANDPRINT_URL)
   anomalyTexture.name = 'TV handprint static anomaly'
   anomalyTexture.colorSpace = THREE.SRGBColorSpace
   anomalyTexture.anisotropy = 4
@@ -244,13 +251,15 @@ export async function createTvProp(scene) {
 
   const screen = root.getObjectByName('TVScreen')
   if (!screen?.isMesh) throw new Error('Optimized TV is missing TVScreen')
+  const screenGlass = root.getObjectByName('tvScreenGlass_Glass_0')
+  if (screenGlass) screenGlass.visible = false
 
-  const { textures, anomalyTexture } = createChannelTextures()
+  const { textures, anomalyTexture } = await createChannelTextures()
   const material = new THREE.MeshStandardMaterial({
     name: 'TV luminous display',
-    map: textures[0],
+    map: textures[TV_INITIAL_CHANNEL],
     emissive: 0xffffff,
-    emissiveMap: textures[0],
+    emissiveMap: textures[TV_INITIAL_CHANNEL],
     emissiveIntensity: TV_NORMAL_BRIGHTNESS,
     roughness: .3,
     metalness: 0,
@@ -273,7 +282,7 @@ export async function createTvProp(scene) {
   interactionAnchor.position.x -= .035
   scene.add(interactionAnchor)
 
-  let channelIndex = 0
+  let channelIndex = TV_INITIAL_CHANNEL
   let anomalyActive = false
   let anomalyTimer = null
   function showTexture(texture) {
@@ -314,7 +323,7 @@ export async function createTvProp(scene) {
       if (anomalyTimer) clearTimeout(anomalyTimer)
       anomalyTimer = null
       anomalyActive = false
-      setChannel(0)
+      setChannel(TV_INITIAL_CHANNEL)
     },
     isGlitching: () => anomalyActive,
     getChannelIndex: () => channelIndex,

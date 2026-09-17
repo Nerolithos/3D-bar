@@ -12,6 +12,7 @@ const headers = await readFile(path.join(root, 'public/_headers'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
 const packagedModelName = 'cozy_bar_v007-6f68f96f.glb'
+const handprintName = 'tv-handprint-b6082550.jpg'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
   'tv-9d401ae2.glb',
@@ -139,17 +140,20 @@ for (const modelName of interactiveModelNames) {
 for (const token of [
   '/models/interactive/tv-9d401ae2.glb',
   'TVScreen',
+  "getObjectByName('tvScreenGlass_Glass_0')",
+  'screenGlass.visible = false',
   'TV_CHANNELS',
   '4242 5142',
   'drawHumanPeeler',
   'drawColorBars',
-  'drawHandprintStatic',
+  'drawOptometryScene',
+  'context.arc(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 148',
+  `/textures/${handprintName}`,
   'TO PEEL HUMANS',
   '666-4514',
   'TV_NORMAL_BRIGHTNESS',
   'TV_ANOMALY_BRIGHTNESS',
-  'createRadialGradient',
-  'context.filter = `blur(${blur}px)`',
+  'textureLoader.loadAsync(HANDPRINT_URL)',
   'isGlitching',
   '}, 2000)',
   'rotation.y = Math.PI',
@@ -157,6 +161,11 @@ for (const token of [
 ]) {
   if (!tvSource.includes(token)) throw new Error(`Missing TV prop feature: ${token}`)
 }
+if (tvSource.includes('Path2D')) throw new Error('Procedural TV hand drawing must not remain')
+const handprint = await readFile(path.join(root, 'public/textures', handprintName))
+if (handprint.byteLength >= 50_000) throw new Error('TV handprint texture exceeds 50 KB')
+const expectedHandprintName = `tv-handprint-${digest(handprint).slice(0, 8)}.jpg`
+if (handprintName !== expectedHandprintName) throw new Error('TV handprint texture hash mismatch')
 if (tvSource.includes('texture.flipY = false')) {
   throw new Error('TV canvas texture must retain vertical flip for the imported screen UVs')
 }
