@@ -45,6 +45,17 @@ test('one proxy selects its eligible action from multiple candidates', () => {
   ], placedState, 1.55), pickup)
 })
 
+test('an ineligible interaction proxy does not hide an eligible target behind it', () => {
+  const unlockedState = { ...emptyState, safeUnlocked: true }
+  const safe = { type: 'safe' }
+  const note = { type: 'note' }
+
+  assert.strictEqual(selectClickTarget([
+    { distance: .7, candidate: safe },
+    { distance: .8, candidate: note },
+  ], unlockedState, 1.55), note)
+})
+
 test('a closer scene surface occludes an interaction target', () => {
   const target = { type: 'seat', id: 'seat-1' }
   const selected = selectClickTarget([

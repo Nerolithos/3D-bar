@@ -34,10 +34,13 @@ export function selectClickTarget(hits, state, maxDistance) {
   for (const hit of sortedHits) {
     if (hit.distance > maxDistance) return null
     if (hit.candidates) {
-      return hit.candidates.find((candidate) => isCandidateEligible(candidate, state)) ?? null
+      const candidate = hit.candidates.find((item) => isCandidateEligible(item, state))
+      if (candidate) return candidate
+      continue
     }
     if (hit.candidate) {
-      return isCandidateEligible(hit.candidate, state) ? hit.candidate : null
+      if (isCandidateEligible(hit.candidate, state)) return hit.candidate
+      continue
     }
     if (hit.blocksInteraction) return null
   }
