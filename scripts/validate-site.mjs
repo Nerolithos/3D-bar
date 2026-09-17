@@ -86,6 +86,12 @@ if (!headers.includes("img-src 'self' data: blob:")) {
 if (!headers.includes("connect-src 'self' blob:")) {
   throw new Error('CSP connect-src must allow embedded GLB blob textures')
 }
+if (!headers.includes("script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com")) {
+  throw new Error('CSP script-src must allow Meshopt WebAssembly and Cloudflare Insights')
+}
+if (!headers.includes("connect-src 'self' blob: https://cloudflareinsights.com")) {
+  throw new Error('CSP connect-src must allow Cloudflare Insights reporting')
+}
 for (const token of [
   `/models/${packagedModelName}`,
   'bar-scene__dial',
