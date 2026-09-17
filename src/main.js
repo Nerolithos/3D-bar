@@ -18,6 +18,7 @@ import {
 } from './game-state.js'
 import { createGlassProp } from './glass-prop.js'
 import { NOTE_LAYOUT } from './glass-visual.js'
+import { createTvProp } from './tv-prop.js'
 import {
   isCandidateEligible,
   isShortClick,
@@ -125,6 +126,7 @@ let standingPitch = pitch
 let glassProp = null
 let noteHandModel = null
 let revealedNoteHandModel = null
+let tvProp = null
 camera.position.copy(startPosition)
 
 function applyLook() {
@@ -396,6 +398,7 @@ function performInteraction(target = interactionTarget) {
     else if (gameState.heldItemId === 'wet-note') gameState = insertWetNote(gameState)
     else gameState = pickupPlacedGlass(gameState)
   }
+  if (target.type === 'tv-screen' && tvProp) tvProp.cycleChannel()
   renderGameState()
   updateInteractionPrompt()
 }
@@ -417,7 +420,7 @@ function resize() {
 
 const roomLoader = new GLTFLoader()
 roomLoader.setMeshoptDecoder(MeshoptDecoder)
-roomLoader.load('/models/cozy_bar_v006-bc7e3e2b.glb', (gltf) => {
+roomLoader.load('/models/cozy_bar_v007-6f68f96f.glb', (gltf) => {
   scene.add(gltf.scene)
   gltf.scene.traverse((object) => {
     if (object.isPointLight) {
@@ -496,6 +499,26 @@ createGlassProp(scene, camera).then((controller) => {
   renderGameState()
 }).catch(() => {
   status.textContent = '互动道具载入失败'
+})
+
+createTvProp(scene).then((controller) => {
+  tvProp = controller
+  occlusionObjects.push(...tvProp.occluders)
+  const tvInteraction = {
+    type: 'tv-screen',
+    object: tvProp.interactionAnchor,
+    prompt: '点击切换频道',
+    get disabled() { return tvProp.isGlitching() },
+  }
+  registerInteraction(
+    tvInteraction,
+    [.08, .34, .46],
+  )
+  renderer.shadowMap.autoUpdate = true
+  renderer.shadowMap.needsUpdate = true
+  shadowFramesRemaining = 2
+}).catch(() => {
+  status.textContent = '电视载入失败，谜题仍可继续'
 })
 
 addEventListener('keydown', (event) => {
@@ -635,6 +658,7 @@ window.barTour = {
     seated: Boolean(seatedAt),
     dialMode,
     gameState,
+    tvChannel: tvProp?.getChannelIndex() ?? null,
     interaction: interactionTarget?.type ?? null,
   }),
   getPerformance: () => ({
@@ -654,6 +678,7 @@ window.barTour = {
     standingReturn = null
     cameraTransition = null
     gameState = createGameState()
+    tvProp?.reset()
     dialMode = false
     dialAngle = 0
     dialDigit = 0

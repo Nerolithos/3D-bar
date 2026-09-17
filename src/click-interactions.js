@@ -3,6 +3,7 @@ export function isShortClick(start, end, threshold = 8) {
 }
 
 export function isCandidateEligible(candidate, state) {
+  if (candidate.disabled) return false
   const heldItemId = state.heldItemId
   const allowedWhileHoldingGlass = ['candle', 'glass-slot'].includes(candidate.type)
   const allowedWhileHoldingNote = candidate.type === 'note-slot' ||

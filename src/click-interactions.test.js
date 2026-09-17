@@ -91,3 +91,8 @@ test('held items permit only their matching actions', () => {
   assert.equal(isCandidateEligible({ type: 'note-slot', slotId: 'note-counter' }, noteHeld), true)
   assert.equal(isCandidateEligible({ type: 'safe' }, noteHeld), false)
 })
+
+test('TV screen is not interactive during its timed anomaly', () => {
+  assert.equal(isCandidateEligible({ type: 'tv-screen', disabled: true }, emptyState), false)
+  assert.equal(isCandidateEligible({ type: 'tv-screen', disabled: false }, emptyState), true)
+})

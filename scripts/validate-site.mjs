@@ -5,14 +5,16 @@ import path from 'node:path'
 const root = path.resolve(import.meta.dirname, '..')
 const source = await readFile(path.join(root, 'src/main.js'), 'utf8')
 const glassSource = await readFile(path.join(root, 'src/glass-prop.js'), 'utf8').catch(() => '')
+const tvSource = await readFile(path.join(root, 'src/tv-prop.js'), 'utf8').catch(() => '')
 const visualSource = await readFile(path.join(root, 'src/glass-visual.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
 const headers = await readFile(path.join(root, 'public/_headers'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
-const packagedModelName = 'cozy_bar_v006-bc7e3e2b.glb'
+const packagedModelName = 'cozy_bar_v007-6f68f96f.glb'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
+  'tv-9d401ae2.glb',
   'wine_glass-70854faa.glb',
 ]
 const required = [
@@ -45,6 +47,7 @@ const required = [
   'dialDialog',
   'pitchArc',
   "from './glass-prop.js'",
+  "from './tv-prop.js'",
   'collectIceGlass',
   'meltHeldGlass',
   'placeHeldGlass',
@@ -63,6 +66,9 @@ const required = [
   'raycaster.setFromCamera(pointer, camera)',
   'event.clientX',
   'event.clientY',
+  "type: 'tv-screen'",
+  "prompt: '点击切换频道'",
+  'tvProp.cycleChannel()',
 ]
 for (const token of required) {
   if (!source.includes(token)) throw new Error(`Missing required feature: ${token}`)
@@ -104,16 +110,16 @@ for (const token of ['data-action="interact"', '>F<']) {
 }
 if (!html.includes('bar-scene__crosshair')) throw new Error('Center aim cursor is missing')
 if (!models.includes(packagedModelName) || !models.includes('interactive')) {
-  throw new Error('public/models must contain the packaged v006 room and interactive assets')
+  throw new Error('public/models must contain the packaged v007 room and interactive assets')
 }
 const modelPath = path.join(modelDir, packagedModelName)
 if ((await stat(modelPath)).size >= 5_000_000) throw new Error('GLB exceeds 5 MB')
-const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v006.glb'))
+const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v007.glb'))
 const packagedModel = await readFile(modelPath)
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex')
 if (digest(sourceModel) !== digest(packagedModel)) throw new Error('Packaged GLB hash mismatch')
-if (source.includes('cozy_bar_v005') || html.includes('cozy_bar_v005')) {
-  throw new Error('Application still references the stale v005 room model')
+if (/cozy_bar_v00[56]/.test(source) || /cozy_bar_v00[56]/.test(html)) {
+  throw new Error('Application still references a stale room model')
 }
 if (!source.includes('MeshoptDecoder') || !source.includes('setMeshoptDecoder')) {
   throw new Error('Meshopt-compressed room is missing its decoder configuration')
@@ -129,6 +135,30 @@ for (const modelName of interactiveModelNames) {
   if (model.byteLength >= 500_000) throw new Error(`${modelName} exceeds 500 KB`)
   const expectedName = modelName.replace(/-[a-f0-9]{8}\.glb$/, `-${digest(model).slice(0, 8)}.glb`)
   if (modelName !== expectedName) throw new Error(`${modelName} hash mismatch`)
+}
+for (const token of [
+  '/models/interactive/tv-9d401ae2.glb',
+  'TVScreen',
+  'TV_CHANNELS',
+  '4242 5142',
+  'drawHumanPeeler',
+  'drawColorBars',
+  'drawHandprintStatic',
+  'TO PEEL HUMANS',
+  '666-4514',
+  'TV_NORMAL_BRIGHTNESS',
+  'TV_ANOMALY_BRIGHTNESS',
+  'createRadialGradient',
+  'context.filter = `blur(${blur}px)`',
+  'isGlitching',
+  '}, 2000)',
+  'rotation.y = Math.PI',
+  'root.position.set(3.55, 1.62, 1.62)',
+]) {
+  if (!tvSource.includes(token)) throw new Error(`Missing TV prop feature: ${token}`)
+}
+if (tvSource.includes('texture.flipY = false')) {
+  throw new Error('TV canvas texture must retain vertical flip for the imported screen UVs')
 }
 for (const token of [
   '/models/interactive/wine_glass-70854faa.glb',
