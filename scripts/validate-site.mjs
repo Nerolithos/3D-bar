@@ -7,11 +7,18 @@ const source = await readFile(path.join(root, 'src/main.js'), 'utf8')
 const glassSource = await readFile(path.join(root, 'src/glass-prop.js'), 'utf8').catch(() => '')
 const tvSource = await readFile(path.join(root, 'src/tv-prop.js'), 'utf8').catch(() => '')
 const visualSource = await readFile(path.join(root, 'src/glass-visual.js'), 'utf8')
+const gameSource = await readFile(path.join(root, 'src/game-state.js'), 'utf8')
+const keypadSource = await readFile(path.join(root, 'src/door-keypad.js'), 'utf8')
+const collisionSource = await readFile(path.join(root, 'src/door-collision.js'), 'utf8')
+const lifecycleSource = await readFile(path.join(root, 'src/scene-lifecycle.js'), 'utf8')
+const horrorSource = await readFile(path.join(root, 'src/horror-room.js'), 'utf8')
+const routeSource = await readFile(path.join(root, 'src/app-route.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
 const headers = await readFile(path.join(root, 'public/_headers'), 'utf8')
 const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
-const packagedModelName = 'cozy_bar_v007-6f68f96f.glb'
+const packagedModelName = 'cozy_bar_v008-e4ad253c.glb'
+const horrorModelName = 'horror_room_v001-62e06a81.glb'
 const handprintName = 'tv-handprint-b6082550.jpg'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
@@ -70,9 +77,23 @@ const required = [
   "type: 'tv-screen'",
   "prompt: '点击切换频道'",
   'tvProp.cycleChannel()',
+  "type: 'door-card-slot'",
+  "type: 'door-keypad'",
+  'startHorrorPreload()',
+  'crossedDoorThreshold(camera.position)',
+  'sceneLifecycle.transition',
+  'updateExitDoorAnimation',
+  'updateHorrorStatic',
+  'addHorrorScreenLights(root)',
+  'sceneLifecycle.activate',
+  'if (!directHorror) roomLoader.load',
+  'updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)',
 ]
 for (const token of required) {
   if (!source.includes(token)) throw new Error(`Missing required feature: ${token}`)
+}
+if (!routeSource.includes("pathname === '/hr2'") || !source.includes('getInitialScene(location.pathname)')) {
+  throw new Error('Missing /hr2 direct horror-room route')
 }
 for (const token of [
   'inventory',
@@ -100,27 +121,56 @@ if (!headers.includes("connect-src 'self' blob: https://cloudflareinsights.com")
   throw new Error('CSP connect-src must allow Cloudflare Insights reporting')
 }
 for (const token of [
-  `/models/${packagedModelName}`,
   'bar-scene__dial',
   'data-action="dial-commit"',
+  'bar-scene__door-keypad',
 ]) {
   if (!html.includes(token)) throw new Error(`Missing interface feature: ${token}`)
 }
+if (!source.includes(`/models/${packagedModelName}`)) throw new Error('Bar model URL is missing from the application source')
+if (html.includes(`/models/${packagedModelName}`)) throw new Error('Bar model must not preload on the /hr2 shortcut')
 for (const token of ['data-action="interact"', '>F<']) {
   if (html.includes(token)) throw new Error(`Removed F interaction UI remains: ${token}`)
 }
 if (!html.includes('bar-scene__crosshair')) throw new Error('Center aim cursor is missing')
-if (!models.includes(packagedModelName) || !models.includes('interactive')) {
-  throw new Error('public/models must contain the packaged v007 room and interactive assets')
+if (!models.includes(packagedModelName) || !models.includes(horrorModelName) || !models.includes('interactive')) {
+  throw new Error('public/models must contain the packaged v008 room, horror room, and interactive assets')
 }
 const modelPath = path.join(modelDir, packagedModelName)
 if ((await stat(modelPath)).size >= 5_000_000) throw new Error('GLB exceeds 5 MB')
-const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v007.glb'))
+const sourceModel = await readFile(path.resolve(root, '../exports/cozy_bar_v008.glb'))
 const packagedModel = await readFile(modelPath)
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex')
 if (digest(sourceModel) !== digest(packagedModel)) throw new Error('Packaged GLB hash mismatch')
-if (/cozy_bar_v00[56]/.test(source) || /cozy_bar_v00[56]/.test(html)) {
+const horrorModelPath = path.join(modelDir, horrorModelName)
+if ((await stat(horrorModelPath)).size >= 2_000_000) throw new Error('Horror room GLB exceeds 2 MB')
+const sourceHorrorModel = await readFile(path.resolve(root, '../exports/horror_room_v001.glb'))
+const packagedHorrorModel = await readFile(horrorModelPath)
+if (digest(sourceHorrorModel) !== digest(packagedHorrorModel)) throw new Error('Packaged horror GLB hash mismatch')
+if (/cozy_bar_v00[5-7]/.test(source) || /cozy_bar_v00[5-7]/.test(html)) {
   throw new Error('Application still references a stale room model')
+}
+
+for (const token of [
+  "const DOOR_CODE = '42425142'",
+  'DOOR_SYMBOLS',
+  'insertCiderCard',
+  'commitDoorSymbol',
+  "roomStatus: 'loading'",
+]) {
+  if (!gameSource.includes(token)) throw new Error(`Missing door state feature: ${token}`)
+}
+if ((keypadSource.match(/'rune-[^']+'/g) ?? []).length !== 10) {
+  throw new Error('Door keypad must expose ten abstract glyphs')
+}
+for (const token of ['Array.from({ length: 8 }', "root.classList.add('is-error')", 'documentRef.exitPointerLock()']) {
+  if (!keypadSource.includes(token)) throw new Error(`Missing keypad feature: ${token}`)
+}
+for (const token of ['resolveBarBoundaryMove', 'crossedDoorThreshold', 'DOORWAY_MIN_X', 'DOORWAY_MAX_X']) {
+  if (!collisionSource.includes(token)) throw new Error(`Missing door collision feature: ${token}`)
+}
+for (const token of ['loadPromise = null', 'disposeObjectTree', 'material.dispose()', 'scene.remove(root)', 'clearCollections']) {
+  if (!lifecycleSource.includes(token)) throw new Error(`Missing lifecycle feature: ${token}`)
 }
 if (!source.includes('MeshoptDecoder') || !source.includes('setMeshoptDecoder')) {
   throw new Error('Meshopt-compressed room is missing its decoder configuration')
@@ -175,6 +225,7 @@ for (const token of [
   'glassAssembly',
   'createPreviewModel',
   'createRevealedNoteModel',
+  'createCiderLabelModel',
   "'CIDER'",
   "'counter-1'",
   "'counter-2'",
@@ -190,6 +241,9 @@ for (const token of [
   'opacity: .72',
 ]) {
   if (!glassSource.includes(token)) throw new Error(`Missing glass prop feature: ${token}`)
+}
+for (const token of ['addHorrorScreenLights', 'new THREE.PointLight', 'horrorRoot.add(light)']) {
+  if (!horrorSource.includes(token)) throw new Error(`Missing horror lighting feature: ${token}`)
 }
 for (const token of [
   'waterCenter: .225',

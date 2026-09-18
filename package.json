@@ -8,7 +8,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test src/game-state.test.js src/click-interactions.test.js src/tv-display.test.js && node scripts/validate-site.mjs"
+    "test": "node --test src/app-route.test.js src/game-state.test.js src/click-interactions.test.js src/door-collision.test.js src/door-keypad.test.js src/glass-prop.test.js src/horror-room.test.js src/scene-lifecycle.test.js src/tv-display.test.js && node scripts/validate-site.mjs"
   },
   "devDependencies": {
     "vite": "^8.3.0"

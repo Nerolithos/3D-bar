@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#07090d">
     <meta name="description" content="Lithos' Bar 第一人称三维场景">
-    <link rel="preload" href="/models/cozy_bar_v007-6f68f96f.glb" as="fetch" crossorigin>
     <title>Lithos' Bar 3D</title>
   </head>
   <body>
@@ -23,6 +22,11 @@
           <button class="bar-scene__dial-number" type="button" data-action="dial-commit" aria-label="锁定当前数字">0</button>
         </div>
         <p class="bar-scene__dial-help">左右拖动 · 点击中央锁定 · × 返回</p>
+      </section>
+      <section class="bar-scene__door-keypad" role="dialog" aria-modal="true" aria-label="门禁符号键盘" hidden>
+        <button class="bar-scene__door-close" type="button" aria-label="关闭符号键盘">×</button>
+        <div class="bar-scene__door-content"></div>
+        <p class="bar-scene__door-status" aria-live="polite">输入符号序列</p>
       </section>
     </main>
     <script type="module" src="/src/main.js"></script>

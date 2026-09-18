@@ -8,6 +8,23 @@ const GLASS_SLOT_IDS = Object.freeze([
 
 const NOTE_SLOT_IDS = Object.freeze(['note-counter', 'note-cafe'])
 
+export const DOOR_SYMBOLS = Object.freeze([
+  Object.freeze({ id: 'rune-ring', digit: 0 }),
+  Object.freeze({ id: 'rune-fork', digit: 1 }),
+  Object.freeze({ id: 'rune-cross', digit: 2 }),
+  Object.freeze({ id: 'rune-wave', digit: 3 }),
+  Object.freeze({ id: 'rune-sun', digit: 4 }),
+  Object.freeze({ id: 'rune-diamond', digit: 5 }),
+  Object.freeze({ id: 'rune-eye', digit: 6 }),
+  Object.freeze({ id: 'rune-ladder', digit: 7 }),
+  Object.freeze({ id: 'rune-spiral', digit: 8 }),
+  Object.freeze({ id: 'rune-crown', digit: 9 }),
+])
+
+const DOOR_CODE = '42425142'
+const DOOR_DIGITS_BY_SYMBOL = new Map(DOOR_SYMBOLS.map(({ id, digit }) => [id, digit]))
+const HORROR_ROOM_STATUSES = new Set(['idle', 'loading', 'ready', 'error'])
+
 export function createGameState() {
   return {
     dialDigits: [],
@@ -26,6 +43,14 @@ export function createGameState() {
       owner: 'safe',
       slotId: null,
       text: 'wet',
+    },
+    door: {
+      cardInserted: false,
+      symbols: [],
+      feedback: null,
+      keypadSolved: false,
+      roomStatus: 'idle',
+      entered: false,
     },
     placementSlots: Object.fromEntries(GLASS_SLOT_IDS.map((slotId) => [slotId, null])),
     notePlacementSlots: Object.fromEntries(NOTE_SLOT_IDS.map((slotId) => [slotId, null])),
@@ -138,4 +163,44 @@ export function collectRevealedNote(state) {
     glass: { ...state.glass, notePresent: false },
     note: { ...state.note, owner: 'held', text: 'CIDER' },
   }
+}
+
+export function insertCiderCard(state) {
+  if (state.door.cardInserted || state.heldItemId !== 'wet-note' ||
+      state.note.owner !== 'held' || state.note.text !== 'CIDER') return state
+  return {
+    ...state,
+    heldItemId: null,
+    note: { ...state.note, owner: 'door', slotId: null },
+    door: { ...state.door, cardInserted: true, roomStatus: 'loading' },
+  }
+}
+
+export function commitDoorSymbol(state, symbolId) {
+  if (!DOOR_DIGITS_BY_SYMBOL.has(symbolId)) {
+    throw new RangeError('Unknown door symbol')
+  }
+  if (!state.door.cardInserted || state.door.keypadSolved) return state
+
+  const symbols = [...state.door.symbols, symbolId]
+  const digits = symbols.map((id) => DOOR_DIGITS_BY_SYMBOL.get(id)).join('')
+  if (!DOOR_CODE.startsWith(digits)) {
+    return { ...state, door: { ...state.door, symbols: [], feedback: 'error' } }
+  }
+  if (digits === DOOR_CODE) {
+    return { ...state, door: { ...state.door, symbols, feedback: 'success', keypadSolved: true } }
+  }
+  return { ...state, door: { ...state.door, symbols, feedback: null } }
+}
+
+export function setHorrorRoomStatus(state, roomStatus) {
+  if (!HORROR_ROOM_STATUSES.has(roomStatus)) {
+    throw new RangeError('Unknown horror room status')
+  }
+  if (state.door.roomStatus === roomStatus) return state
+  return { ...state, door: { ...state.door, roomStatus } }
+}
+
+export function isDoorReadyToOpen(state) {
+  return state.door.keypadSolved && state.door.roomStatus === 'ready'
 }

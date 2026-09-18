@@ -79,6 +79,12 @@ function createCiderGeometry() {
   return word
 }
 
+export function createCiderLabelModel() {
+  const label = createCiderGeometry()
+  label.name = 'CIDER door label'
+  return label
+}
+
 function createRevealedNoteModel() {
   const note = new THREE.Group()
   const paper = new THREE.Mesh(
@@ -246,6 +252,7 @@ export async function createGlassProp(scene, camera) {
   sync({ glass: { owner: 'scene', slotId: null, content: 'ice' } })
   return {
     glassAssembly,
+    handAnchor,
     initialAnchor,
     candleTarget,
     slotAnchors,
@@ -254,5 +261,6 @@ export async function createGlassProp(scene, camera) {
     update,
     createPreviewModel,
     createRevealedNoteModel,
+    createCiderLabelModel,
   }
 }

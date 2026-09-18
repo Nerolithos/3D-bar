@@ -251,6 +251,7 @@ export async function createTvProp(scene) {
 
   const screen = root.getObjectByName('TVScreen')
   if (!screen?.isMesh) throw new Error('Optimized TV is missing TVScreen')
+  const importedScreenMaterial = screen.material
   const screenGlass = root.getObjectByName('tvScreenGlass_Glass_0')
   if (screenGlass) screenGlass.visible = false
 
@@ -266,6 +267,8 @@ export async function createTvProp(scene) {
     side: THREE.DoubleSide,
   })
   screen.material = material
+  if (Array.isArray(importedScreenMaterial)) importedScreenMaterial.forEach((item) => item.dispose())
+  else importedScreenMaterial?.dispose()
 
   const occluders = []
   root.traverse((object) => {
@@ -324,6 +327,27 @@ export async function createTvProp(scene) {
       anomalyTimer = null
       anomalyActive = false
       setChannel(TV_INITIAL_CHANNEL)
+    },
+    dispose() {
+      if (anomalyTimer) clearTimeout(anomalyTimer)
+      anomalyTimer = null
+      root.removeFromParent()
+      interactionAnchor.removeFromParent()
+      const geometries = new Set()
+      const materials = new Set()
+      root.traverse((object) => {
+        if (object.geometry && !geometries.has(object.geometry)) {
+          geometries.add(object.geometry)
+          object.geometry.dispose()
+        }
+        const objectMaterials = Array.isArray(object.material) ? object.material : [object.material]
+        objectMaterials.filter(Boolean).forEach((objectMaterial) => {
+          if (materials.has(objectMaterial)) return
+          materials.add(objectMaterial)
+          objectMaterial.dispose()
+        })
+      })
+      new Set([...textures, anomalyTexture]).forEach((texture) => texture.dispose())
     },
     isGlitching: () => anomalyActive,
     getChannelIndex: () => channelIndex,

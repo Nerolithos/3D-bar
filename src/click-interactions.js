@@ -7,7 +7,8 @@ export function isCandidateEligible(candidate, state) {
   const heldItemId = state.heldItemId
   const allowedWhileHoldingGlass = ['candle', 'glass-slot'].includes(candidate.type)
   const allowedWhileHoldingNote = candidate.type === 'note-slot' ||
-    (candidate.type === 'glass-placed' && state.glass.content === 'water')
+    (candidate.type === 'glass-placed' && state.glass.content === 'water') ||
+    candidate.type === 'door-card-slot'
 
   if (heldItemId === 'glass' && !allowedWhileHoldingGlass) return false
   if (heldItemId === 'wet-note' && !allowedWhileHoldingNote) return false
@@ -27,6 +28,11 @@ export function isCandidateEligible(candidate, state) {
       (heldItemId !== 'wet-note' || state.notePlacementSlots[candidate.slotId])) return false
   if (candidate.type === 'note-placed' &&
       (state.note.owner !== 'placed' || state.note.slotId !== candidate.slotId)) return false
+    if (candidate.type === 'door-card-slot' &&
+      (heldItemId !== 'wet-note' || state.note.owner !== 'held' ||
+       state.note.text !== 'CIDER' || state.door.cardInserted)) return false
+    if (candidate.type === 'door-keypad' &&
+      (!state.door.cardInserted || state.door.keypadSolved)) return false
   return true
 }
 

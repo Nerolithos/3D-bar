@@ -14,6 +14,7 @@ const emptyState = {
   glass: { owner: 'scene', content: 'ice', slotId: null, notePresent: false },
   placementSlots: { 'counter-1': null },
   notePlacementSlots: { 'note-counter': null },
+  door: { cardInserted: false, keypadSolved: false },
 }
 
 test('pointer movement up to eight CSS pixels is a click', () => {
@@ -95,4 +96,25 @@ test('held items permit only their matching actions', () => {
 test('TV screen is not interactive during its timed anomaly', () => {
   assert.equal(isCandidateEligible({ type: 'tv-screen', disabled: true }, emptyState), false)
   assert.equal(isCandidateEligible({ type: 'tv-screen', disabled: false }, emptyState), true)
+})
+
+test('door card slot only accepts the held CIDER card', () => {
+  const wetNote = {
+    ...emptyState,
+    heldItemId: 'wet-note',
+    note: { owner: 'held', text: 'wet' },
+  }
+  const ciderCard = { ...wetNote, note: { owner: 'held', text: 'CIDER' } }
+
+  assert.equal(isCandidateEligible({ type: 'door-card-slot' }, emptyState), false)
+  assert.equal(isCandidateEligible({ type: 'door-card-slot' }, wetNote), false)
+  assert.equal(isCandidateEligible({ type: 'door-card-slot' }, ciderCard), true)
+})
+
+test('door keypad is available only after card insertion and before solve', () => {
+  assert.equal(isCandidateEligible({ type: 'door-keypad' }, emptyState), false)
+  const inserted = { ...emptyState, door: { cardInserted: true, keypadSolved: false } }
+  assert.equal(isCandidateEligible({ type: 'door-keypad' }, inserted), true)
+  const solved = { ...inserted, door: { cardInserted: true, keypadSolved: true } }
+  assert.equal(isCandidateEligible({ type: 'door-keypad' }, solved), false)
 })

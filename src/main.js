@@ -4,26 +4,40 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import {
+  DOOR_SYMBOLS,
   collectIceGlass,
   collectNote,
   collectRevealedNote,
+  commitDoorSymbol,
   commitDialDigit,
   createGameState,
+  insertCiderCard,
   insertWetNote,
+  setHorrorRoomStatus,
   meltHeldGlass,
   pickupPlacedNote,
   pickupPlacedGlass,
   placeHeldGlass,
   placeHeldNote,
 } from './game-state.js'
+import { createDoorKeypadController } from './door-keypad.js'
+import { DOOR_COLLISION_RADIUS, crossedDoorThreshold, resolveBarBoundaryMove } from './door-collision.js'
 import { createGlassProp } from './glass-prop.js'
 import { NOTE_LAYOUT } from './glass-visual.js'
+import {
+  addHorrorScreenLights,
+  addHorrorTvPile,
+  HORROR_TV_MODEL_URL,
+  updateHorrorEntranceDoor,
+} from './horror-room.js'
+import { createSceneLifecycle } from './scene-lifecycle.js'
 import { createTvProp } from './tv-prop.js'
 import {
   isCandidateEligible,
   isShortClick,
   selectClickTarget,
 } from './click-interactions.js'
+import { getInitialScene } from './app-route.js'
 
 const host = document.querySelector('.bar-scene')
 const status = document.querySelector('.bar-scene__status')
@@ -33,6 +47,8 @@ const dialDialog = document.querySelector('.bar-scene__dial')
 const dialWheel = document.querySelector('.bar-scene__dial-wheel')
 const dialNumber = document.querySelector('.bar-scene__dial-number')
 const dialSlots = [...document.querySelectorAll('.bar-scene__slots span')]
+const doorKeypadDialog = document.querySelector('.bar-scene__door-keypad')
+const directHorror = getInitialScene(location.pathname) === 'horror'
 const touchMode = matchMedia('(pointer: coarse)').matches
 const maxDpr = touchMode ? 1.25 : 1.5
 
@@ -53,7 +69,8 @@ host.prepend(renderer.domElement)
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x030507)
-scene.add(new THREE.HemisphereLight(0x304d73, 0x160a04, .34))
+const ambientLight = new THREE.HemisphereLight(0x304d73, 0x160a04, .34)
+scene.add(ambientLight)
 RectAreaLightUniformsLib.init()
 
 function addAreaLight({ name, color, intensity, width, height, position, target }) {
@@ -77,7 +94,7 @@ const webLightRig = [
   { name: 'counterPool', color: 0xff6825, intensity: 2, width: 1.4, height: 1,
     position: [.7, 2.45, -.25], target: [.7, 1.1, -.8] },
 ]
-webLightRig.forEach(addAreaLight)
+const webLights = webLightRig.map(addAreaLight)
 
 const moonShadow = new THREE.DirectionalLight(0x779bd4, .32)
 moonShadow.position.set(-4.8, 2.8, .4)
@@ -92,7 +109,7 @@ const MAX_PITCH = THREE.MathUtils.degToRad(70)
 const roomBounds = { minX: -3.72, maxX: 3.72, minZ: -2.72, maxZ: 2.72 }
 const counterBounds = { minX: -2.05, maxX: 3.62, minZ: -1.82, maxZ: -.15 }
 const MAX_INTERACTION_DISTANCE = 1.75
-const playerRadius = .2
+const playerRadius = DOOR_COLLISION_RADIUS
 const movementSpeed = 2.8
 const keys = new Set()
 const clock = new THREE.Clock()
@@ -114,6 +131,7 @@ let seatedAt = null
 let standingReturn = null
 let cameraTransition = null
 let dialMode = false
+let keypadMode = false
 let dialAngle = 0
 let dialDigit = 0
 let dialDragX = null
@@ -126,7 +144,20 @@ let standingPitch = pitch
 let glassProp = null
 let noteHandModel = null
 let revealedNoteHandModel = null
+let doorCardHintModel = null
 let tvProp = null
+let barRoot = null
+let exitDoorPivot = null
+let exitDoorBaseY = 0
+let doorCardAnchor = null
+let doorCardHintAnchor = null
+let doorStatusLight = null
+let doorPassable = false
+let horrorMode = false
+let horrorStatic = null
+let horrorStaticElapsed = 0
+let horrorDoorPivot = null
+let sceneLifecycle = null
 camera.position.copy(startPosition)
 
 function applyLook() {
@@ -136,13 +167,22 @@ function applyLook() {
 }
 
 function clampPosition(position) {
-  position.x = THREE.MathUtils.clamp(position.x, roomBounds.minX, roomBounds.maxX)
-  position.z = THREE.MathUtils.clamp(position.z, roomBounds.minZ, roomBounds.maxZ)
+  if (horrorMode) {
+    position.x = THREE.MathUtils.clamp(position.x, -3.78, 3.78)
+    position.z = THREE.MathUtils.clamp(position.z, -4.78, 4.72)
+  } else {
+    position.x = THREE.MathUtils.clamp(position.x, roomBounds.minX, roomBounds.maxX)
+    position.z = Math.min(position.z, roomBounds.maxZ)
+    const resolved = resolveBarBoundaryMove(camera.position, position, doorPassable)
+    position.x = resolved.x
+    position.z = resolved.z
+  }
   position.y = EYE_HEIGHT
   return position
 }
 
 function hitsCounter(position) {
+  if (horrorMode) return false
   return position.x > counterBounds.minX - playerRadius &&
     position.x < counterBounds.maxX + playerRadius &&
     position.z > counterBounds.minZ - playerRadius &&
@@ -156,10 +196,11 @@ function tryMove(delta) {
   const candidateZ = clampPosition(camera.position.clone().add(new THREE.Vector3(0, 0, delta.z)))
   if (!hitsCounter(candidateZ)) camera.position.copy(candidateZ)
   camera.position.y = EYE_HEIGHT
+  if (!horrorMode && crossedDoorThreshold(camera.position)) enterHorrorRoom()
 }
 
 function lookBy(deltaYaw, deltaPitch) {
-  if (dialMode) return
+  if (dialMode || keypadMode) return
   yaw += deltaYaw
   pitch = THREE.MathUtils.clamp(pitch + deltaPitch, -MAX_PITCH, MAX_PITCH)
   applyLook()
@@ -191,7 +232,7 @@ function registerInteraction(candidate, size, offset = [0, 0, 0]) {
 }
 
 function updateMovement(deltaTime) {
-  if (seatedAt || dialMode || cameraTransition) return
+  if (seatedAt || dialMode || keypadMode || cameraTransition) return
   const forwardAmount = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0)
   const rightAmount = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
   if (forwardAmount || rightAmount) {
@@ -217,20 +258,38 @@ function renderGameState() {
   if (safeNote) safeNote.visible = gameState.safeUnlocked && gameState.note.owner === 'safe'
   syncNoteModel(noteHandModel, gameState.note.text === 'wet')
   syncNoteModel(revealedNoteHandModel, gameState.note.text === 'CIDER')
+  syncDoorCardHint()
   glassProp?.sync(gameState)
+  if (keypadMode) doorKeypad.render(gameState)
+  if (doorStatusLight?.material?.color) {
+    const color = gameState.door.keypadSolved ? 0x75b65a :
+      gameState.door.feedback === 'error' || gameState.door.roomStatus === 'error' ? 0xd43b2e : 0xb88b3b
+    doorStatusLight.material.color.setHex(color)
+  }
+}
+
+function syncDoorCardHint() {
+  if (!doorCardHintModel || !doorCardHintAnchor) return
+  if (doorCardHintModel.parent !== doorCardHintAnchor) doorCardHintAnchor.add(doorCardHintModel)
+  doorCardHintModel.visible = !gameState.door.cardInserted
+  doorCardHintModel.position.set(-.052, .014, .003)
+  doorCardHintModel.rotation.set(0, 0, 0)
+  doorCardHintModel.scale.setScalar(1.2)
 }
 
 function syncNoteModel(model, matchesText) {
   if (!model || !glassProp) return
-  const visible = matchesText && ['held', 'placed'].includes(gameState.note.owner)
+  const visible = matchesText && ['held', 'placed', 'door'].includes(gameState.note.owner)
   model.visible = visible
   if (!visible) return
   const held = gameState.note.owner === 'held'
-  const anchor = held ? camera : glassProp.noteSlotAnchors[gameState.note.slotId]
+  const inserted = gameState.note.owner === 'door'
+  const anchor = held ? camera : inserted ? doorCardAnchor : glassProp.noteSlotAnchors[gameState.note.slotId]
+  if (!anchor) return
   if (model.parent !== anchor) anchor.add(model)
-  model.position.set(held ? -.24 : 0, held ? -.2 : NOTE_LAYOUT.placedOffset, held ? -.48 : 0)
-  model.rotation.set(held ? -1.28 : -Math.PI / 2, 0, -.18)
-  model.scale.setScalar(held ? 1.35 : 1)
+  model.position.set(held ? -.24 : 0, held ? -.2 : inserted ? 0 : NOTE_LAYOUT.placedOffset, held ? -.48 : inserted ? .004 : 0)
+  model.rotation.set(held ? -1.28 : inserted ? 0 : -Math.PI / 2, 0, inserted ? 0 : -.18)
+  model.scale.setScalar(held ? 1.35 : inserted ? 1.2 : 1)
 }
 
 function setCameraTransition(destination, onComplete, {
@@ -287,7 +346,7 @@ function promptFor(candidate) {
 }
 
 function findInteractionTarget(clientX, clientY) {
-  if (dialMode || cameraTransition) return null
+  if (dialMode || keypadMode || cameraTransition) return null
   if (seatedAt) return { type: 'stand', object: seatedAt, prompt: '点击起身' }
   if (touchMode) setPointerFromEvent(clientX, clientY)
   else pointer.set(0, 0)
@@ -355,6 +414,29 @@ function closeDial() {
   dialDialog.hidden = true
 }
 
+function openKeypad() {
+  keypadMode = true
+  keys.clear()
+  walkTarget = null
+  doorKeypad.open(gameState)
+}
+
+function closeKeypad() {
+  keypadMode = false
+  doorKeypad.close()
+}
+
+const doorKeypad = createDoorKeypadController({
+  root: doorKeypadDialog,
+  symbols: DOOR_SYMBOLS,
+  onSymbol(state, symbolId) {
+    gameState = commitDoorSymbol(state, symbolId)
+    renderGameState()
+    if (sceneLifecycle?.canOpen(gameState)) setTimeout(closeKeypad, 420)
+    return gameState
+  },
+})
+
 function commitCurrentDigit() {
   if (!dialMode || gameState.safeUnlocked) return
   gameState = commitDialDigit(gameState, dialDigit)
@@ -375,6 +457,7 @@ function performInteraction(target = interactionTarget) {
     commitCurrentDigit()
     return
   }
+  if (keypadMode) return
   if (!target || !isCandidateEligible(target, gameState)) return
   if (target.type === 'seat') sitDown(target.object)
   if (target.type === 'stand') standUp()
@@ -399,6 +482,17 @@ function performInteraction(target = interactionTarget) {
     else gameState = pickupPlacedGlass(gameState)
   }
   if (target.type === 'tv-screen' && tvProp) tvProp.cycleChannel()
+  if (target.type === 'door-card-slot') {
+    const nextState = insertCiderCard(gameState)
+    if (nextState !== gameState) {
+      gameState = nextState
+      startHorrorPreload()
+    }
+  }
+  if (target.type === 'door-keypad') {
+    if (gameState.door.roomStatus === 'error') startHorrorPreload()
+    openKeypad()
+  }
   renderGameState()
   updateInteractionPrompt()
 }
@@ -408,6 +502,159 @@ function updateSafeAnimation(deltaTime) {
   const doorTarget = safeDoorBaseY + (gameState.safeUnlocked ? -1.55 : 0)
   safeDoor.rotation.y = THREE.MathUtils.damp(safeDoor.rotation.y, doorTarget, 5, deltaTime)
   safeDial.rotation.z = THREE.MathUtils.damp(safeDial.rotation.z, safeDialBaseZ + dialAngle, 10, deltaTime)
+}
+
+function updateExitDoorAnimation(deltaTime) {
+  if (!exitDoorPivot || horrorMode) return
+  const shouldOpen = sceneLifecycle?.canOpen(gameState) ?? false
+  const target = exitDoorBaseY + (shouldOpen ? -Math.PI / 2 : 0)
+  exitDoorPivot.rotation.y = THREE.MathUtils.damp(exitDoorPivot.rotation.y, target, 4.5, deltaTime)
+  doorPassable = shouldOpen && Math.abs(exitDoorPivot.rotation.y - target) < .12
+}
+
+function createHorrorStaticMaterial() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 96
+  const context = canvas.getContext('2d')
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.magFilter = THREE.NearestFilter
+  texture.minFilter = THREE.NearestFilter
+  const material = new THREE.MeshStandardMaterial({
+    name: 'Shared animated CRT static',
+    map: texture,
+    emissive: 0xffffff,
+    emissiveMap: texture,
+    emissiveIntensity: 3.4,
+    roughness: .45,
+  })
+  return { context, texture, material }
+}
+
+function updateHorrorStatic(deltaTime) {
+  if (!horrorMode || !horrorStatic) return
+  horrorStaticElapsed += deltaTime
+  if (horrorStaticElapsed < .075) return
+  horrorStaticElapsed = 0
+  const { context, texture } = horrorStatic
+  const image = context.createImageData(128, 96)
+  for (let index = 0; index < image.data.length; index += 4) {
+    const value = Math.random() > .5 ? 225 : Math.floor(Math.random() * 85)
+    image.data[index] = value
+    image.data[index + 1] = value
+    image.data[index + 2] = value
+    image.data[index + 3] = 255
+  }
+  context.putImageData(image, 0, 0)
+  texture.needsUpdate = true
+}
+
+function prepareHorrorRoom(root) {
+  horrorStatic = createHorrorStaticMaterial()
+  const replacedMaterials = new Set()
+  root.traverse((object) => {
+    if (!object.isMesh) return
+    object.castShadow = true
+    object.receiveShadow = true
+    if (object.name.startsWith('tvScreenGlass_Glass_0')) object.visible = false
+    if (object.name.startsWith('CRTScreen') || object.name.startsWith('TVScreen')) {
+      const materials = Array.isArray(object.material) ? object.material : [object.material]
+      materials.filter(Boolean).forEach((material) => replacedMaterials.add(material))
+      object.material = horrorStatic.material
+    }
+  })
+  replacedMaterials.forEach((material) => material.dispose())
+  addHorrorScreenLights(root)
+  root.name = 'HorrorRoom'
+  return root
+}
+
+function startHorrorPreload() {
+  if (gameState.door.roomStatus !== 'ready') {
+    gameState = setHorrorRoomStatus(gameState, 'loading')
+    renderGameState()
+  }
+  sceneLifecycle.preload((event) => {
+    if (event.total) {
+      const progress = Math.round(event.loaded / event.total * 100)
+      interactionPrompt.textContent = `门后空间载入中 ${progress}%`
+    }
+  }).then(() => {
+    gameState = setHorrorRoomStatus(gameState, 'ready')
+    renderGameState()
+    if (gameState.door.keypadSolved) setTimeout(closeKeypad, 420)
+  }).catch(() => {
+    gameState = setHorrorRoomStatus(gameState, 'error')
+    renderGameState()
+  })
+}
+
+function collectBarRoots() {
+  const roots = [
+    barRoot,
+    ambientLight,
+    ...webLights,
+    moonShadow,
+    moonShadow.target,
+    tvProp?.root,
+    tvProp?.interactionAnchor,
+    glassProp?.handAnchor,
+    glassProp?.initialAnchor,
+    glassProp?.candleTarget,
+    ...Object.values(glassProp?.slotAnchors ?? {}),
+    ...Object.values(glassProp?.noteSlotAnchors ?? {}),
+    noteHandModel,
+    revealedNoteHandModel,
+    doorCardHintModel,
+  ]
+  return [...new Set(roots.filter(Boolean))]
+}
+
+function activateHorrorRoom() {
+  horrorMode = true
+  doorPassable = false
+  gameState = { ...gameState, door: { ...gameState.door, entered: true } }
+  barRoot = null
+  glassProp = null
+  tvProp = null
+  safeDoor = null
+  safeDial = null
+  safeNote = null
+  noteHandModel = null
+  revealedNoteHandModel = null
+  doorCardHintModel = null
+  exitDoorPivot = null
+  doorCardAnchor = null
+  doorCardHintAnchor = null
+  doorStatusLight = null
+  const horrorRoot = sceneLifecycle.getHorrorRoot()
+  horrorDoorPivot = horrorRoot.getObjectByName('HorrorEntranceDoorPivot')
+  if (horrorDoorPivot) horrorDoorPivot.rotation.y = -Math.PI / 2
+  horrorRoot.traverse((object) => {
+    if (!object.isMesh) return
+    occlusionObjects.push(object)
+    if (object.name === 'HorrorFloor') floorTargets.push(object)
+  })
+  camera.position.set(0, EYE_HEIGHT, 4.45)
+  yaw = 0
+  pitch = 0
+  scene.background.setHex(0x010202)
+  host.classList.add('is-loaded', 'is-horror')
+  status.textContent = '恐怖房间已载入'
+  renderGameState()
+  applyLook()
+}
+
+function enterHorrorRoom() {
+  if (horrorMode || !sceneLifecycle?.canOpen(gameState)) return
+  tvProp?.dispose()
+  tvProp = null
+  sceneLifecycle.setBarRoots(collectBarRoots())
+  if (!sceneLifecycle.transition(gameState, {
+    clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
+  })) return
+  activateHorrorRoom()
 }
 
 function resize() {
@@ -420,9 +667,36 @@ function resize() {
 
 const roomLoader = new GLTFLoader()
 roomLoader.setMeshoptDecoder(MeshoptDecoder)
-roomLoader.load('/models/cozy_bar_v007-6f68f96f.glb', (gltf) => {
-  scene.add(gltf.scene)
-  gltf.scene.traverse((object) => {
+sceneLifecycle = createSceneLifecycle({
+  scene,
+  loadHorrorRoom: async (onProgress) => {
+    const [roomGltf, televisionGltf] = await Promise.all([
+      roomLoader.loadAsync('/models/horror_room_v001-62e06a81.glb', onProgress),
+      roomLoader.loadAsync(HORROR_TV_MODEL_URL),
+    ])
+    const televisionRoot = televisionGltf.scene.getObjectByName('TVRoot') ?? televisionGltf.scene
+    addHorrorTvPile(roomGltf.scene, televisionRoot)
+    return prepareHorrorRoom(roomGltf.scene)
+  },
+})
+if (directHorror) {
+  sceneLifecycle.setBarRoots([ambientLight, ...webLights, moonShadow, moonShadow.target])
+  status.textContent = '正在进入恐怖房间...'
+  sceneLifecycle.preload((event) => {
+    if (event.total) status.textContent = `正在进入恐怖房间... ${Math.round(event.loaded / event.total * 100)}%`
+  }).then(() => {
+    if (sceneLifecycle.activate({ clearCollections: [interactionHitObjects, occlusionObjects, floorTargets] })) {
+      activateHorrorRoom()
+    }
+  }).catch(() => {
+    status.textContent = '恐怖房间载入失败'
+  })
+}
+
+if (!directHorror) roomLoader.load('/models/cozy_bar_v008-e4ad253c.glb', (gltf) => {
+  barRoot = gltf.scene
+  scene.add(barRoot)
+  barRoot.traverse((object) => {
     if (object.isPointLight) {
       object.decay = 2
       object.distance = object.name.startsWith('Neon accent') ? 1.15 : 1.7
@@ -443,6 +717,11 @@ roomLoader.load('/models/cozy_bar_v007-6f68f96f.glb', (gltf) => {
   safeDoor = gltf.scene.getObjectByName('SafeDoor')
   safeDial = gltf.scene.getObjectByName('SafeDial')
   safeNote = gltf.scene.getObjectByName('SafeNote')
+  exitDoorPivot = gltf.scene.getObjectByName('ExitDoorPivot')
+  exitDoorBaseY = exitDoorPivot.rotation.y
+  doorCardAnchor = gltf.scene.getObjectByName('DoorCardInserted')
+  doorCardHintAnchor = gltf.scene.getObjectByName('DoorCardHint')
+  doorStatusLight = gltf.scene.getObjectByName('DoorStatusLight')
   noteHandModel = safeNote.clone(true)
   noteHandModel.name = 'WetNoteHandModel'
   noteHandModel.position.set(-.24, -.2, -.48)
@@ -455,6 +734,16 @@ roomLoader.load('/models/cozy_bar_v007-6f68f96f.glb', (gltf) => {
     [.86, .92, .28],
   )
   registerInteraction({ type: 'note', object: safeNote, prompt: '点击拾取纸条' }, [.38, .06, .24])
+  registerInteraction({
+    type: 'door-card-slot',
+    object: gltf.scene.getObjectByName('DoorCardSlot'),
+    prompt: '点击插入 CIDER 卡片',
+  }, [.48, .28, .18])
+  registerInteraction({
+    type: 'door-keypad',
+    object: gltf.scene.getObjectByName('DoorKeypadInteract'),
+    prompt: '点击使用符号键盘',
+  }, [.58, .58, .18])
   safeDoorBaseY = safeDoor.rotation.y
   safeDialBaseZ = safeDial.rotation.z
   renderer.shadowMap.autoUpdate = true
@@ -469,7 +758,7 @@ roomLoader.load('/models/cozy_bar_v007-6f68f96f.glb', (gltf) => {
   status.textContent = '场景载入失败'
 })
 
-createGlassProp(scene, camera).then((controller) => {
+if (!directHorror) createGlassProp(scene, camera).then((controller) => {
   glassProp = controller
   revealedNoteHandModel = glassProp.createRevealedNoteModel()
   revealedNoteHandModel.name = 'RevealedNoteHandModel'
@@ -478,6 +767,9 @@ createGlassProp(scene, camera).then((controller) => {
   revealedNoteHandModel.scale.setScalar(1.35)
   revealedNoteHandModel.visible = false
   camera.add(revealedNoteHandModel)
+  doorCardHintModel = glassProp.createCiderLabelModel()
+  doorCardHintModel.name = 'DoorCardHintModel'
+  doorCardHintModel.visible = false
   registerInteraction(
     { type: 'glass-source', object: glassProp.initialAnchor, prompt: '点击拾取冰酒杯' },
     [.22, .35, .22],
@@ -501,7 +793,11 @@ createGlassProp(scene, camera).then((controller) => {
   status.textContent = '互动道具载入失败'
 })
 
-createTvProp(scene).then((controller) => {
+if (!directHorror) createTvProp(scene).then((controller) => {
+  if (horrorMode) {
+    controller.dispose()
+    return
+  }
   tvProp = controller
   occlusionObjects.push(...tvProp.occluders)
   const tvInteraction = {
@@ -528,6 +824,7 @@ addEventListener('keydown', (event) => {
     event.preventDefault()
   }
   if (event.code === 'Escape' && dialMode) closeDial()
+  if (event.code === 'Escape' && keypadMode) closeKeypad()
 })
 addEventListener('keyup', (event) => keys.delete(event.code))
 
@@ -567,7 +864,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   pointerGesture = null
   host.classList.remove('is-dragging')
   pointerPosition = { x: event.clientX, y: event.clientY }
-  if (clicked && !dialMode) {
+  if (clicked && !dialMode && !keypadMode) {
     const target = findInteractionTarget(event.clientX, event.clientY)
     if (target) {
       performInteraction(target)
@@ -597,7 +894,7 @@ renderer.domElement.addEventListener('pointercancel', () => {
 })
 
 renderer.domElement.addEventListener('click', () => {
-  if (touchMode || dialMode) return
+  if (touchMode || dialMode || keypadMode) return
   if (document.pointerLockElement !== renderer.domElement) {
     renderer.domElement.requestPointerLock()
     return
@@ -628,6 +925,7 @@ dialWheel.addEventListener('pointermove', (event) => {
 dialWheel.addEventListener('pointerup', () => { dialDragX = null })
 dialWheel.addEventListener('pointercancel', () => { dialDragX = null })
 document.querySelector('.bar-scene__close').addEventListener('click', closeDial)
+document.querySelector('.bar-scene__door-close').addEventListener('click', closeKeypad)
 document.querySelector('[data-action="dial-commit"]').addEventListener('click', commitCurrentDigit)
 
 new ResizeObserver(resize).observe(host)
@@ -640,6 +938,9 @@ renderer.setAnimationLoop(() => {
   updateCameraTransition(deltaTime)
   updateMovement(deltaTime)
   updateSafeAnimation(deltaTime)
+  updateExitDoorAnimation(deltaTime)
+  if (horrorMode) updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)
+  updateHorrorStatic(deltaTime)
   glassProp?.update(deltaTime)
   if (!touchMode) updateInteractionPrompt()
   renderer.render(scene, camera)
@@ -657,6 +958,8 @@ window.barTour = {
     loaded: host.classList.contains('is-loaded'),
     seated: Boolean(seatedAt),
     dialMode,
+    keypadMode,
+    horrorMode,
     gameState,
     tvChannel: tvProp?.getChannelIndex() ?? null,
     interaction: interactionTarget?.type ?? null,
@@ -670,6 +973,7 @@ window.barTour = {
   lookBy,
   moveBy: (x, z) => tryMove(new THREE.Vector3(x, 0, z)),
   reset: () => {
+    if (horrorMode) return false
     camera.position.copy(startPosition)
     yaw = 0
     pitch = .08
@@ -680,12 +984,15 @@ window.barTour = {
     gameState = createGameState()
     tvProp?.reset()
     dialMode = false
+    keypadMode = false
     dialAngle = 0
     dialDigit = 0
     if (safeNote) safeNote.visible = true
     closeDial()
+    closeKeypad()
     renderGameState()
     applyLook()
+    return true
   },
   interact: performInteraction,
   setDialDigit: (digit) => {

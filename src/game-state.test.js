@@ -2,17 +2,22 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  DOOR_SYMBOLS,
   collectIceGlass,
   collectNote,
   collectRevealedNote,
+  commitDoorSymbol,
   commitDialDigit,
   createGameState,
+  insertCiderCard,
   insertWetNote,
+  isDoorReadyToOpen,
   meltHeldGlass,
   pickupPlacedNote,
   pickupPlacedGlass,
   placeHeldGlass,
   placeHeldNote,
+  setHorrorRoomStatus,
 } from './game-state.js'
 import { GLASS_LAYOUT, NOTE_LAYOUT, getGlassVisualState } from './glass-visual.js'
 
@@ -54,6 +59,56 @@ test('the note can only be collected once the safe is unlocked', () => {
 test('dial input accepts digits only', () => {
   assert.throws(() => commitDialDigit(createGameState(), 10), /digit/)
   assert.throws(() => commitDialDigit(createGameState(), 1.5), /digit/)
+})
+
+test('only the held CIDER card can be inserted into the exit door', () => {
+    const initial = createGameState()
+    assert.strictEqual(insertCiderCard(initial), initial)
+
+    const ciderCard = {
+      ...initial,
+      heldItemId: 'wet-note',
+      noteCollected: true,
+      note: { ...initial.note, owner: 'held', text: 'CIDER' },
+    }
+    const inserted = insertCiderCard(ciderCard)
+    assert.equal(inserted.heldItemId, null)
+    assert.equal(inserted.note.owner, 'door')
+    assert.equal(inserted.door.cardInserted, true)
+    assert.equal(inserted.door.roomStatus, 'loading')
+    assert.strictEqual(insertCiderCard(inserted), inserted)
+})
+
+test('door keypad rejects the first incorrect position and allows unlimited retries', () => {
+    const inserted = insertCiderCard({
+      ...createGameState(),
+      heldItemId: 'wet-note',
+      note: { owner: 'held', slotId: null, text: 'CIDER' },
+    })
+    const wrong = commitDoorSymbol(inserted, 'rune-eye')
+    assert.deepEqual(wrong.door.symbols, [])
+    assert.equal(wrong.door.feedback, 'error')
+
+    const retry = commitDoorSymbol(wrong, 'rune-sun')
+    assert.deepEqual(retry.door.symbols, ['rune-sun'])
+    assert.equal(retry.door.feedback, null)
+})
+
+test('fixed abstract symbols decode 42425142 and wait for the room', () => {
+    assert.deepEqual(DOOR_SYMBOLS.map(({ digit }) => digit).sort(), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    const inserted = insertCiderCard({
+      ...createGameState(),
+      heldItemId: 'wet-note',
+      note: { owner: 'held', slotId: null, text: 'CIDER' },
+    })
+    const sequence = ['rune-sun', 'rune-cross', 'rune-sun', 'rune-cross', 'rune-diamond', 'rune-fork', 'rune-sun', 'rune-cross']
+    const solved = sequence.reduce(commitDoorSymbol, inserted)
+    assert.equal(solved.door.keypadSolved, true)
+    assert.equal(solved.door.feedback, 'success')
+    assert.equal(isDoorReadyToOpen(solved), false)
+
+    const ready = setHorrorRoomStatus(solved, 'ready')
+    assert.equal(isDoorReadyToOpen(ready), true)
 })
 
 test('picking up an item immediately holds it and blocks picking up another item', () => {

@@ -118,7 +118,8 @@ body {
 
 .bar-scene__interaction.is-visible { opacity: 1; }
 
-.bar-scene__dial[hidden] { display: none; }
+.bar-scene__dial[hidden],
+.bar-scene__door-keypad[hidden] { display: none; }
 
 .bar-scene__dial {
   position: absolute;
@@ -207,6 +208,98 @@ body {
   letter-spacing: 0;
 }
 
+.bar-scene__door-keypad {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  width: min(25rem, calc(100vw - 2rem));
+  padding: 2.8rem 1.3rem 1.4rem;
+  border: 2px solid #74795d;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #2b3027, #0b0e0c 68%, #20251d);
+  box-shadow: 0 1.5rem 5rem #000d, inset 0 0 0 4px #070907;
+  transform: translate(-50%, -50%);
+}
+
+.bar-scene__door-close {
+  position: absolute;
+  top: .65rem;
+  right: .65rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #d9b87855;
+  border-radius: 50%;
+  background: #0c100c;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+
+.bar-scene__door-slots {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: .35rem;
+  margin-bottom: 1.2rem;
+}
+
+.bar-scene__door-slots span {
+  display: grid;
+  aspect-ratio: 1;
+  border: 1px solid #929878;
+  border-radius: 3px;
+  background: #050706;
+  color: #e2c37f;
+  font: 700 1.15rem/1 Georgia, serif;
+  place-items: center;
+}
+
+.bar-scene__door-keys {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: .55rem;
+}
+
+.bar-scene__symbol-key {
+  display: grid;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 1px solid #7d8469;
+  border-radius: 4px;
+  background: #151a15;
+  color: #eee0b9;
+  font: 700 clamp(1.35rem, 5vw, 1.8rem)/1 Georgia, serif;
+  cursor: pointer;
+  place-items: center;
+}
+
+.bar-scene__symbol-key:hover { background: #282f25; }
+
+.bar-scene__door-status {
+  min-height: 1.2rem;
+  margin: 1rem 0 0;
+  color: #bfc3a3;
+  font-size: .78rem;
+  text-align: center;
+}
+
+.bar-scene__door-keypad.is-error {
+  animation: keypad-error 380ms ease;
+}
+
+.bar-scene__door-keypad[data-feedback="success"] {
+  border-color: #a8b982;
+  box-shadow: 0 1.5rem 5rem #000d, inset 0 0 0 4px #162012;
+}
+
+@keyframes keypad-error {
+  0%, 100% { border-color: #74795d; transform: translate(-50%, -50%); }
+  30% { border-color: #d43b2e; transform: translate(calc(-50% - 4px), -50%); }
+  65% { border-color: #d43b2e; transform: translate(calc(-50% + 4px), -50%); }
+}
+
 button:focus-visible { outline: 2px solid #f1c77b; outline-offset: 2px; }
 
 @media (max-width: 640px) {
@@ -221,6 +314,7 @@ button:focus-visible { outline: 2px solid #f1c77b; outline-offset: 2px; }
 
   .bar-scene__dial { min-height: 23rem; }
   .bar-scene__dial-wheel { width: 11.5rem; height: 11.5rem; }
+  .bar-scene__door-keypad { width: min(22rem, calc(100vw - 1.25rem)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
