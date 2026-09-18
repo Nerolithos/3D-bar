@@ -15,6 +15,7 @@ const emptyState = {
   placementSlots: { 'counter-1': null },
   notePlacementSlots: { 'note-counter': null },
   door: { cardInserted: false, keypadSolved: false },
+  portals: { 'pool-01': { status: 'locked', error: null } },
 }
 
 test('pointer movement up to eight CSS pixels is a click', () => {
@@ -117,4 +118,18 @@ test('door keypad is available only after card insertion and before solve', () =
   assert.equal(isCandidateEligible({ type: 'door-keypad' }, inserted), true)
   const solved = { ...inserted, door: { cardInserted: true, keypadSolved: true } }
   assert.equal(isCandidateEligible({ type: 'door-keypad' }, solved), false)
+})
+
+test('pool portal is clickable only when ready or retryable after an error', () => {
+  const candidate = { type: 'portal-screen', portalId: 'pool-01' }
+  const withStatus = (status) => ({
+    ...emptyState,
+    portals: { 'pool-01': { status, error: status === 'error' ? 'network' : null } },
+  })
+
+  assert.equal(isCandidateEligible(candidate, withStatus('locked')), false)
+  assert.equal(isCandidateEligible(candidate, withStatus('loading')), false)
+  assert.equal(isCandidateEligible(candidate, withStatus('ready')), true)
+  assert.equal(isCandidateEligible(candidate, withStatus('error')), true)
+  assert.equal(isCandidateEligible(candidate, withStatus('entering')), false)
 })

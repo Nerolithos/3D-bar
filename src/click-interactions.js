@@ -4,6 +4,10 @@ export function isShortClick(start, end, threshold = 8) {
 
 export function isCandidateEligible(candidate, state) {
   if (candidate.disabled) return false
+  if (candidate.type === 'portal-screen') {
+    const status = state.portals?.[candidate.portalId]?.status
+    return status === 'ready' || status === 'error'
+  }
   const heldItemId = state.heldItemId
   const allowedWhileHoldingGlass = ['candle', 'glass-slot'].includes(candidate.type)
   const allowedWhileHoldingNote = candidate.type === 'note-slot' ||

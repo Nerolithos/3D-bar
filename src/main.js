@@ -32,6 +32,19 @@ import {
 } from './horror-room.js'
 import { createSceneLifecycle } from './scene-lifecycle.js'
 import { createTvProp } from './tv-prop.js'
+import { preparePoolRoom, resolvePoolMove } from './pool-room.js'
+import { createPortalScreenController } from './portal-screen.js'
+import { createPortalLifecycle } from './portal-lifecycle.js'
+import {
+  PORTALS,
+  beginPortalEntry,
+  createPortalState,
+  failPortalPreload,
+  finishPortalEntry,
+  requestPortalPreload,
+  resolvePortalPreload,
+  unlockPortal,
+} from './portal-state.js'
 import {
   isCandidateEligible,
   isShortClick,
@@ -158,7 +171,16 @@ let horrorStatic = null
 let horrorStaticElapsed = 0
 let horrorDoorPivot = null
 let sceneLifecycle = null
+let portalLifecycle = null
+let portalState = createPortalState()
+let portalScreen = null
+let poolMode = false
+let poolController = null
 camera.position.copy(startPosition)
+
+function interactionState() {
+  return { ...gameState, portals: portalState }
+}
 
 function applyLook() {
   camera.rotation.order = 'YXZ'
@@ -167,7 +189,11 @@ function applyLook() {
 }
 
 function clampPosition(position) {
-  if (horrorMode) {
+  if (poolMode) {
+    const resolved = resolvePoolMove(position, camera.position)
+    position.x = resolved.x
+    position.z = resolved.z
+  } else if (horrorMode) {
     position.x = THREE.MathUtils.clamp(position.x, -3.78, 3.78)
     position.z = THREE.MathUtils.clamp(position.z, -4.78, 4.72)
   } else {
@@ -182,7 +208,7 @@ function clampPosition(position) {
 }
 
 function hitsCounter(position) {
-  if (horrorMode) return false
+  if (horrorMode || poolMode) return false
   return position.x > counterBounds.minX - playerRadius &&
     position.x < counterBounds.maxX + playerRadius &&
     position.z > counterBounds.minZ - playerRadius &&
@@ -296,6 +322,7 @@ function setCameraTransition(destination, onComplete, {
   duration = .65,
   targetPitch = pitch,
   pitchArc = 0,
+  targetYaw = yaw,
 } = {}) {
   cameraTransition = {
     from: camera.position.clone(),
@@ -305,6 +332,8 @@ function setCameraTransition(destination, onComplete, {
     fromPitch: pitch,
     targetPitch,
     pitchArc,
+    fromYaw: yaw,
+    targetYaw,
     onComplete,
   }
   walkTarget = null
@@ -319,6 +348,7 @@ function updateCameraTransition(deltaTime) {
   camera.position.lerpVectors(cameraTransition.from, cameraTransition.to, eased)
   pitch = THREE.MathUtils.lerp(cameraTransition.fromPitch, cameraTransition.targetPitch, eased) +
     Math.sin(progress * Math.PI) * cameraTransition.pitchArc
+  yaw = THREE.MathUtils.lerp(cameraTransition.fromYaw, cameraTransition.targetYaw, eased)
   applyLook()
   if (progress < 1) return
   const onComplete = cameraTransition.onComplete
@@ -336,6 +366,9 @@ function setPointerFromEvent(clientX, clientY) {
 
 function promptFor(candidate) {
   if (!candidate) return ''
+  if (candidate.type === 'portal-screen' && portalState[candidate.portalId]?.status === 'error') {
+    return '泳池空间载入失败，点击重试'
+  }
   if (candidate.type === 'glass-placed' && gameState.glass.content === 'cider') {
     return '点击拾取显影纸条'
   }
@@ -355,7 +388,7 @@ function findInteractionTarget(clientX, clientY) {
     .map((hit) => hit.object.userData.interactionCandidates
       ? { distance: hit.distance, candidates: hit.object.userData.interactionCandidates }
       : { distance: hit.distance, blocksInteraction: true })
-  return selectClickTarget(hits, gameState, MAX_INTERACTION_DISTANCE)
+  return selectClickTarget(hits, interactionState(), MAX_INTERACTION_DISTANCE)
 }
 
 function updateInteractionPrompt(clientX = pointerPosition?.x, clientY = pointerPosition?.y) {
@@ -458,7 +491,7 @@ function performInteraction(target = interactionTarget) {
     return
   }
   if (keypadMode) return
-  if (!target || !isCandidateEligible(target, gameState)) return
+  if (!target || !isCandidateEligible(target, interactionState())) return
   if (target.type === 'seat') sitDown(target.object)
   if (target.type === 'stand') standUp()
   if (target.type === 'safe') openDial()
@@ -482,6 +515,10 @@ function performInteraction(target = interactionTarget) {
     else gameState = pickupPlacedGlass(gameState)
   }
   if (target.type === 'tv-screen' && tvProp) tvProp.cycleChannel()
+  if (target.type === 'portal-screen') {
+    if (portalState[target.portalId]?.status === 'error') startPoolPortalPreload()
+    else enterPoolPortal(target.portalId)
+  }
   if (target.type === 'door-card-slot') {
     const nextState = insertCiderCard(gameState)
     if (nextState !== gameState) {
@@ -550,7 +587,7 @@ function updateHorrorStatic(deltaTime) {
   texture.needsUpdate = true
 }
 
-function prepareHorrorRoom(root) {
+function prepareHorrorRoom(root, portalTexture) {
   horrorStatic = createHorrorStaticMaterial()
   const replacedMaterials = new Set()
   root.traverse((object) => {
@@ -565,9 +602,92 @@ function prepareHorrorRoom(root) {
     }
   })
   replacedMaterials.forEach((material) => material.dispose())
+  const portalConfig = PORTALS[0]
+  const screen = root.getObjectByName(portalConfig.screenName)
+  if (!screen) throw new Error(`Missing portal screen: ${portalConfig.screenName}`)
+  portalScreen = createPortalScreenController(screen, portalTexture)
+  syncPortalScreen()
   addHorrorScreenLights(root)
   root.name = 'HorrorRoom'
   return root
+}
+
+function syncPortalScreen() {
+  portalScreen?.setStatus(portalState[PORTALS[0].id].status)
+}
+
+function startPoolPortalPreload() {
+  const portalId = PORTALS[0].id
+  const nextState = requestPortalPreload(portalState, portalId)
+  if (nextState === portalState) return
+  portalState = nextState
+  syncPortalScreen()
+  portalLifecycle.preload(portalId, (event) => {
+    if (event.total && horrorMode) {
+      interactionPrompt.textContent = `泳池空间载入中 ${Math.round(event.loaded / event.total * 100)}%`
+    }
+  }).then(() => {
+    portalState = resolvePortalPreload(portalState, portalId)
+    syncPortalScreen()
+    updateInteractionPrompt()
+  }).catch((error) => {
+    portalState = failPortalPreload(portalState, portalId, error?.message)
+    syncPortalScreen()
+    updateInteractionPrompt()
+  })
+}
+
+function activatePoolRoom(portalId) {
+  const root = portalLifecycle.getRoot(portalId)
+  poolMode = true
+  horrorMode = false
+  horrorDoorPivot = null
+  horrorStatic = null
+  portalScreen = null
+  root.traverse((object) => {
+    if (!object.isMesh) return
+    if (object.name !== 'PoolWaterSurface' && !object.name.startsWith('WaterJet')) occlusionObjects.push(object)
+    if (object.name.startsWith('PoolWalkway') || object.name === 'PoolWaterSurface') floorTargets.push(object)
+  })
+  const spawn = root.getObjectByName('PoolSpawn')
+  if (spawn) spawn.getWorldPosition(camera.position)
+  else camera.position.set(0, EYE_HEIGHT, 6.2)
+  camera.position.y = EYE_HEIGHT
+  yaw = 0
+  pitch = -.04
+  scene.background.setHex(0x071a20)
+  renderer.toneMappingExposure = .68
+  shadowFramesRemaining = 2
+  renderer.shadowMap.autoUpdate = true
+  host.classList.remove('is-horror', 'is-portal-pulling')
+  host.classList.add('is-pool')
+  status.textContent = '泳池空间已载入'
+  portalState = finishPortalEntry(portalState, portalId)
+  applyLook()
+}
+
+function enterPoolPortal(portalId) {
+  if (!horrorMode || portalState[portalId]?.status !== 'ready' || cameraTransition) return
+  portalState = beginPortalEntry(portalState, portalId)
+  syncPortalScreen()
+  host.classList.add('is-portal-pulling')
+  const screenPosition = portalScreen.screen.getWorldPosition(new THREE.Vector3())
+  const toScreen = screenPosition.clone().sub(camera.position)
+  const horizontal = Math.hypot(toScreen.x, toScreen.z)
+  const destination = screenPosition.clone().lerp(camera.position, .08)
+  const targetYaw = Math.atan2(-toScreen.x, -toScreen.z)
+  const targetPitch = Math.atan2(toScreen.y, horizontal)
+  setCameraTransition(destination, () => {
+    const horrorRoot = sceneLifecycle.getHorrorRoot()
+    portalLifecycle.setCurrentRoots([horrorRoot])
+    if (!portalLifecycle.transition(portalId, {
+      clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
+    })) {
+      host.classList.remove('is-portal-pulling')
+      return
+    }
+    activatePoolRoom(portalId)
+  }, { duration: 1.3, targetYaw, targetPitch, pitchArc: -.16 })
 }
 
 function startHorrorPreload() {
@@ -644,6 +764,16 @@ function activateHorrorRoom() {
   status.textContent = '恐怖房间已载入'
   renderGameState()
   applyLook()
+  const portal = PORTALS[0]
+  portalState = unlockPortal(portalState, portal.id)
+  syncPortalScreen()
+  registerInteraction({
+    type: 'portal-screen',
+    portalId: portal.id,
+    object: portalScreen.screen,
+    prompt: '点击进入泳池空间',
+  }, [.9, .62, .16])
+  startPoolPortalPreload()
 }
 
 function enterHorrorRoom() {
@@ -667,16 +797,27 @@ function resize() {
 
 const roomLoader = new GLTFLoader()
 roomLoader.setMeshoptDecoder(MeshoptDecoder)
+portalLifecycle = createPortalLifecycle({
+  scene,
+  loadPortal: async (portalId, onProgress) => {
+    const config = PORTALS.find(({ id }) => id === portalId)
+    if (!config) throw new Error(`Unknown portal: ${portalId}`)
+    const gltf = await roomLoader.loadAsync(config.modelUrl, onProgress)
+    poolController = preparePoolRoom(gltf.scene)
+    return poolController.root
+  },
+})
 sceneLifecycle = createSceneLifecycle({
   scene,
   loadHorrorRoom: async (onProgress) => {
-    const [roomGltf, televisionGltf] = await Promise.all([
+    const [roomGltf, televisionGltf, portalTexture] = await Promise.all([
       roomLoader.loadAsync('/models/horror_room_v001-62e06a81.glb', onProgress),
       roomLoader.loadAsync(HORROR_TV_MODEL_URL),
+      new THREE.TextureLoader().loadAsync(PORTALS[0].previewUrl),
     ])
     const televisionRoot = televisionGltf.scene.getObjectByName('TVRoot') ?? televisionGltf.scene
     addHorrorTvPile(roomGltf.scene, televisionRoot)
-    return prepareHorrorRoom(roomGltf.scene)
+    return prepareHorrorRoom(roomGltf.scene, portalTexture)
   },
 })
 if (directHorror) {
@@ -941,6 +1082,7 @@ renderer.setAnimationLoop(() => {
   updateExitDoorAnimation(deltaTime)
   if (horrorMode) updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)
   updateHorrorStatic(deltaTime)
+  poolController?.update(deltaTime)
   glassProp?.update(deltaTime)
   if (!touchMode) updateInteractionPrompt()
   renderer.render(scene, camera)
@@ -960,6 +1102,8 @@ window.barTour = {
     dialMode,
     keypadMode,
     horrorMode,
+    poolMode,
+    portalState,
     gameState,
     tvChannel: tvProp?.getChannelIndex() ?? null,
     interaction: interactionTarget?.type ?? null,
