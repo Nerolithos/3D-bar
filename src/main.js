@@ -32,7 +32,7 @@ import {
 } from './horror-room.js'
 import { createSceneLifecycle } from './scene-lifecycle.js'
 import { createTvProp } from './tv-prop.js'
-import { preparePoolRoom, resolvePoolMove } from './pool-room.js'
+import { preparePoolRoom, resolvePoolMove, resolveShortestAngle } from './pool-room.js'
 import { createPortalScreenController } from './portal-screen.js'
 import { createPortalLifecycle } from './portal-lifecycle.js'
 import {
@@ -176,6 +176,8 @@ let portalState = createPortalState()
 let portalScreen = null
 let poolMode = false
 let poolController = null
+let poolClimbHeight = null
+let poolLadderSide = 1
 camera.position.copy(startPosition)
 
 function interactionState() {
@@ -203,7 +205,7 @@ function clampPosition(position) {
     position.x = resolved.x
     position.z = resolved.z
   }
-  position.y = EYE_HEIGHT
+  position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight : EYE_HEIGHT
   return position
 }
 
@@ -221,7 +223,7 @@ function tryMove(delta) {
   if (!hitsCounter(candidateX)) camera.position.copy(candidateX)
   const candidateZ = clampPosition(camera.position.clone().add(new THREE.Vector3(0, 0, delta.z)))
   if (!hitsCounter(candidateZ)) camera.position.copy(candidateZ)
-  camera.position.y = EYE_HEIGHT
+  camera.position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight : EYE_HEIGHT
   if (!horrorMode && crossedDoorThreshold(camera.position)) enterHorrorRoom()
 }
 
@@ -258,7 +260,7 @@ function registerInteraction(candidate, size, offset = [0, 0, 0]) {
 }
 
 function updateMovement(deltaTime) {
-  if (seatedAt || dialMode || keypadMode || cameraTransition) return
+  if (seatedAt || dialMode || keypadMode || cameraTransition || poolClimbHeight !== null) return
   const forwardAmount = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0)
   const rightAmount = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
   if (forwardAmount || rightAmount) {
@@ -333,7 +335,7 @@ function setCameraTransition(destination, onComplete, {
     targetPitch,
     pitchArc,
     fromYaw: yaw,
-    targetYaw,
+    targetYaw: resolveShortestAngle(yaw, targetYaw),
     onComplete,
   }
   walkTarget = null
@@ -375,12 +377,16 @@ function promptFor(candidate) {
   if (candidate.type === 'glass-placed' && gameState.heldItemId === 'wet-note') {
     return '点击将 wet 纸条放入水中'
   }
+  if (candidate.type === 'pool-ladder' && poolClimbHeight !== null) return '点击沿梯子爬下去'
   return candidate.prompt
 }
 
 function findInteractionTarget(clientX, clientY) {
   if (dialMode || keypadMode || cameraTransition) return null
   if (seatedAt) return { type: 'stand', object: seatedAt, prompt: '点击起身' }
+  if (poolClimbHeight !== null && poolController?.isLadderReady()) {
+    return { type: 'pool-ladder', object: poolController.ladder, prompt: '点击沿梯子爬下去' }
+  }
   if (touchMode) setPointerFromEvent(clientX, clientY)
   else pointer.set(0, 0)
   raycaster.setFromCamera(pointer, camera)
@@ -430,6 +436,32 @@ function standUp() {
     pitchArc: .07,
   })
   interactionTarget = { type: 'seat', object: seat, prompt: '点击坐下' }
+}
+
+function usePoolLadder() {
+  if (poolClimbHeight === null) {
+    poolLadderSide = camera.position.z >= poolController.ladder.position.z ? 1 : -1
+  }
+  const base = poolController.getClimbBasePosition(EYE_HEIGHT, poolLadderSide)
+  const top = poolController.getClimbPosition(poolLadderSide)
+  const ladderDirection = poolController.ladder.position.clone().sub(base)
+  const ladderYaw = Math.atan2(-ladderDirection.x, -ladderDirection.z)
+  if (poolClimbHeight !== null) {
+    status.textContent = '正在沿梯子下降...'
+    setCameraTransition(base, () => {
+      poolClimbHeight = null
+      status.textContent = '已回到泳池水面'
+    }, { duration: 1.35, targetYaw: ladderYaw, targetPitch: -.04, pitchArc: -.025 })
+    return
+  }
+  status.textContent = '正在靠近梯子...'
+  setCameraTransition(base, () => {
+    status.textContent = '正在沿梯子攀爬...'
+    setCameraTransition(top, () => {
+      poolClimbHeight = top.y
+      status.textContent = '已爬到第一段梯子的顶部，再次点击可爬下去'
+    }, { duration: 1.45, targetYaw: ladderYaw, targetPitch: -.08, pitchArc: .025 })
+  }, { duration: .6, targetYaw: ladderYaw, targetPitch: -.04, pitchArc: .035 })
 }
 
 function openDial() {
@@ -518,6 +550,13 @@ function performInteraction(target = interactionTarget) {
   if (target.type === 'portal-screen') {
     if (portalState[target.portalId]?.status === 'error') startPoolPortalPreload()
     else enterPoolPortal(target.portalId)
+  }
+  if (target.type === 'pool-duck' && poolController) {
+    const puzzle = poolController.rotateDuck(target.duckId)
+    status.textContent = puzzle.solved ? '三只鸭嘴均与对应水龙头同向，池底传来金属震动' : `第 ${target.duckId.at(-1)} 只鸭子转动了 45°`
+  }
+  if (target.type === 'pool-ladder' && poolController?.isLadderReady()) {
+    usePoolLadder()
   }
   if (target.type === 'door-card-slot') {
     const nextState = insertCiderCard(gameState)
@@ -640,13 +679,17 @@ function startPoolPortalPreload() {
 function activatePoolRoom(portalId) {
   const root = portalLifecycle.getRoot(portalId)
   poolMode = true
+  poolClimbHeight = null
+  poolLadderSide = 1
   horrorMode = false
   horrorDoorPivot = null
   horrorStatic = null
   portalScreen = null
   root.traverse((object) => {
     if (!object.isMesh) return
-    if (object.name !== 'PoolWaterSurface' && !object.name.startsWith('WaterJet')) occlusionObjects.push(object)
+    if (object.name !== 'PoolWaterSurface' &&
+        !object.name.startsWith('WaterJet') &&
+        !/^RubberDuck.*_[123]$/.test(object.name)) occlusionObjects.push(object)
     if (object.name.startsWith('PoolWalkway') || object.name === 'PoolWaterSurface') floorTargets.push(object)
   })
   const spawn = root.getObjectByName('PoolSpawn')
@@ -663,6 +706,19 @@ function activatePoolRoom(portalId) {
   host.classList.add('is-pool')
   status.textContent = '泳池空间已载入'
   portalState = finishPortalEntry(portalState, portalId)
+  Object.entries(poolController.puzzleDucks).forEach(([duckId, object]) => registerInteraction({
+    type: 'pool-duck',
+    duckId,
+    object,
+    prompt: `点击将第 ${duckId.at(-1)} 只鸭子旋转 45°`,
+    get disabled() { return poolController.getPuzzleState().solved },
+  }, [.72, .72, .72], [0, .16, 0]))
+  registerInteraction({
+    type: 'pool-ladder',
+    object: poolController.ladder,
+    prompt: '点击爬到梯子顶部',
+    get disabled() { return !poolController.isLadderReady() },
+  }, [.82, 4.15, .68], [0, 2.075, 0])
   applyLook()
 }
 
@@ -1103,6 +1159,9 @@ window.barTour = {
     keypadMode,
     horrorMode,
     poolMode,
+    poolPuzzle: poolController?.getPuzzleState() ?? null,
+    poolLadderReady: poolController?.isLadderReady() ?? false,
+    poolClimbHeight,
     portalState,
     gameState,
     tvChannel: tvProp?.getChannelIndex() ?? null,
@@ -1113,6 +1172,8 @@ window.barTour = {
     shadowAutoUpdate: renderer.shadowMap.autoUpdate,
     maxDpr,
     triangles: renderer.info.render.triangles,
+    geometries: renderer.info.memory.geometries,
+    textures: renderer.info.memory.textures,
   }),
   lookBy,
   moveBy: (x, z) => tryMove(new THREE.Vector3(x, 0, z)),

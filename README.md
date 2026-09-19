@@ -50,7 +50,7 @@ Select **Save and Deploy**. Every later push to `main` creates a production depl
 
 ## Static assets
 
-The bar, one-way horror room, and pool portal room live at `public/models/cozy_bar_v008-e4ad253c.glb`, `public/models/horror_room_v001-62e06a81.glb`, and `public/models/pool_room_v001-36cdbf4e.glb`. Cloudflare serves them with a one-year immutable cache through `public/_headers`. Each suffix is derived from the GLB SHA-256 digest. Never replace bytes at an existing model URL: after changing a model, update the digest suffix plus the paths in the relevant source module and `scripts/validate-site.mjs`.
+The bar, one-way horror room, and pool portal room live at `public/models/cozy_bar_v008-e4ad253c.glb`, `public/models/horror_room_v001-62e06a81.glb`, and `public/models/pool_room_v001-2ee22a73.glb`. Cloudflare serves them with a one-year immutable cache through `public/_headers`. Each suffix is derived from the GLB SHA-256 digest. Never replace bytes at an existing model URL: after changing a model, update the digest suffix plus the paths in the relevant source module and `scripts/validate-site.mjs`.
 
 Open `/hr2` (for example, `http://localhost:4173/hr2`) to load directly into the horror room without running or downloading the bar sequence first.
 
@@ -68,7 +68,7 @@ Regenerate and validate these scenes with Blender 5.2:
 
 Inserting the revealed `CIDER` card starts the horror-room preload. The abstract keypad decodes to `42425142`; crossing the opened doorway disposes the bar scene. Returning to the bar then requires a hard browser refresh.
 
-Entering the horror room unlocks and preloads the leftmost pool television (`pool-01`). Clicking it after loading plays the portal pull animation, disposes the horror room, and places the player at the validated pool spawn. The pool room uses a shared three-wave Gerstner shader, window-localized animated floor caustics, a low-resolution nine-tap blurred ceiling mirror, literal openings assembled into the back wall, soft radial Tyndall haze, and linked instances of the optimized oxidized faucet; the transition is intentionally one-way.
+Entering the horror room unlocks and preloads the leftmost pool television (`pool-01`). Clicking it after loading plays the portal pull animation, disposes the horror room, and places the player at the validated pool spawn. The pool room uses a shared three-wave Gerstner shader, window-localized animated floor caustics, a clear lightly filtered ceiling mirror, literal openings assembled into the back wall, soft radial Tyndall haze, and linked instances of the optimized oxidized faucet; the transition is intentionally one-way. The right-wall faucets form a vertical map of all seven floating props. Each of the three ducks rotates independently in 45° steps; matching all three beaks to their mapped faucet directions raises a straight brushed-metal ladder to half-room height. The ladder interaction approaches and climbs vertically, then accepts another click at the top to descend.
 
 The interactive glass and ice derivatives live under `public/models/interactive/`. Regenerate them from the untouched root-level source GLBs with Blender 5.2:
 

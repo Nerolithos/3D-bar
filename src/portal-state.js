@@ -3,7 +3,7 @@ export const PORTALS = Object.freeze([
     id: 'pool-01',
     screenName: 'CRTScreen_06',
     label: '泳池空间',
-    modelUrl: '/models/pool_room_v001-36cdbf4e.glb',
+    modelUrl: '/models/pool_room_v001-2ee22a73.glb',
     previewUrl: '/textures/pool-portal-preview-7dea476f.jpg',
     oneWay: true,
   }),

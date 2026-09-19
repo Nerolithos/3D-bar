@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as THREE from 'three'
+import { POOL_DUCKS } from './pool-puzzle.js'
 
 import {
   POOL_COLUMN_RADIUS,
   createPoolCausticsMaterial,
   createPoolWaterMaterial,
   preparePoolRoom,
+  resolveShortestAngle,
   resolvePoolMove,
 } from './pool-room.js'
+
+test('ladder camera turns through the shortest angle instead of spinning', () => {
+  const current = Math.PI * 6.1
+  const resolved = resolveShortestAngle(current, 0)
+  assert.ok(Math.abs(resolved - current) < Math.PI)
+  assert.ok(Math.abs(Math.sin(resolved)) < 1e-9)
+})
 
 test('pool movement stays inside the room and outside the central column', () => {
   assert.deepEqual(resolvePoolMove({ x: 20, z: -20 }), { x: 5.05, z: -7.05 })
@@ -50,9 +59,41 @@ test('window-localized pool-floor caustics animate procedurally', () => {
   assert.equal(material.blending, THREE.AdditiveBlending)
 })
 
-test('pool ceiling becomes a low-resolution multi-tap blurred mirror', () => {
+test('pool ceiling becomes a clear lightly filtered mirror', () => {
   const source = preparePoolRoom.toString()
-  assert.match(source, /Blurred pool ceiling mirror/)
-  assert.match(source, /textureWidth: 256/)
-  assert.match(source, /blurredMirrorShader/)
+  assert.match(source, /Clear pool ceiling mirror/)
+  assert.match(source, /textureWidth: 384/)
+  assert.match(source, /clearMirrorShader/)
+})
+
+test('three-duck alignment reveals a shared-geometry half-height ladder', () => {
+  const root = new THREE.Group()
+  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial())
+  ceiling.name = 'PoolCeiling'
+  root.add(ceiling)
+  for (const index of [1, 2, 3]) {
+    for (const name of [`RubberDuckBody_${index}`, `RubberDuckHead_${index}`, `RubberDuckBeak_${index}`]) {
+      const part = new THREE.Mesh(new THREE.SphereGeometry(.1), new THREE.MeshBasicMaterial())
+      part.name = name
+      root.add(part)
+    }
+  }
+  const controller = preparePoolRoom(root)
+  assert.equal(root.getObjectByName('PoolCeiling'), undefined)
+  const ladderMeshes = controller.ladder.children.filter((object) => object.isMesh)
+  assert.equal(new Set(ladderMeshes.map(({ geometry }) => geometry)).size, 2)
+  assert.equal(new Set(ladderMeshes.map(({ material }) => material)).size, 1)
+  assert.equal(controller.ladder.visible, false)
+  for (const { id, targetStep } of POOL_DUCKS) {
+    for (let index = 0; index < targetStep; index += 1) controller.rotateDuck(id)
+  }
+  assert.equal(controller.getPuzzleState().solved, true)
+  assert.equal(controller.ladder.visible, true)
+  for (let index = 0; index < 120; index += 1) controller.update(1 / 60)
+  assert.equal(controller.isLadderReady(), true)
+  const base = controller.getClimbBasePosition(1.65)
+  const top = controller.getClimbPosition()
+  assert.equal(base.x, top.x)
+  assert.equal(base.z, top.z)
+  assert.ok(top.y > base.y)
 })

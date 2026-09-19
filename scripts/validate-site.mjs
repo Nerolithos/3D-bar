@@ -21,7 +21,7 @@ const modelDir = path.join(root, 'public/models')
 const models = await readdir(modelDir).catch(() => [])
 const packagedModelName = 'cozy_bar_v008-e4ad253c.glb'
 const horrorModelName = 'horror_room_v001-62e06a81.glb'
-const poolModelName = 'pool_room_v001-36cdbf4e.glb'
+const poolModelName = 'pool_room_v001-2ee22a73.glb'
 const poolPreviewName = 'pool-portal-preview-7dea476f.jpg'
 const handprintName = 'tv-handprint-b6082550.jpg'
 const interactiveModelNames = [
@@ -172,8 +172,11 @@ if (poolPreviewName !== `pool-portal-preview-${digest(poolPreview).slice(0, 8)}.
 for (const token of [poolModelName, poolPreviewName, "id: 'pool-01'", "screenName: 'CRTScreen_06'"]) {
   if (!portalSource.includes(token)) throw new Error(`Missing pool portal configuration: ${token}`)
 }
-for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'resolvePoolMove', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Blurred pool ceiling mirror', 'textureWidth: 256']) {
+for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'resolvePoolMove', 'resolveShortestAngle', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Clear pool ceiling mirror', 'textureWidth: 384', 'Pool puzzle half-height ladder', 'POOL_DUCKS', 'rotateDuck(duckId)', 'isLadderReady']) {
   if (!poolSource.includes(token)) throw new Error(`Missing pool room runtime feature: ${token}`)
+}
+for (const token of ["type: 'pool-duck'", "type: 'pool-ladder'", 'poolClimbHeight', 'usePoolLadder', '点击沿梯子爬下去']) {
+  if (!source.includes(token)) throw new Error(`Missing pool puzzle interaction: ${token}`)
 }
 if (/cozy_bar_v00[5-7]/.test(source) || /cozy_bar_v00[5-7]/.test(html)) {
   throw new Error('Application still references a stale room model')

@@ -1,8 +1,13 @@
 import * as THREE from 'three'
 import { Reflector } from 'three/addons/objects/Reflector.js'
+import { POOL_DUCKS, createPoolPuzzleState, rotatePoolDuck } from './pool-puzzle.js'
 
 export const POOL_BOUNDS = Object.freeze({ minX: -5.05, maxX: 5.05, minZ: -7.05, maxZ: 7.05 })
 export const POOL_COLUMN_RADIUS = 1.12
+
+export function resolveShortestAngle(current, target) {
+  return current + Math.atan2(Math.sin(target - current), Math.cos(target - current))
+}
 
 export function samplePoolWaveHeight(x, z, time) {
   const wave = (dx, dz, amplitude, wavelength, speed) => {
@@ -150,8 +155,8 @@ export function createPoolCausticsMaterial() {
   })
 }
 
-const blurredMirrorShader = {
-  name: 'Blurred pool ceiling mirror shader',
+const clearMirrorShader = {
+  name: 'Clear pool ceiling mirror shader',
   uniforms: {
     color: { value: null },
     tDiffuse: { value: null },
@@ -173,28 +178,62 @@ const blurredMirrorShader = {
     varying vec4 vUv;
     void main() {
       vec2 uv = vUv.xy / vUv.w;
-      vec2 stepSize = texelSize * 1.65;
-      vec3 blurred = texture2D(tDiffuse, uv).rgb * .20;
-      blurred += texture2D(tDiffuse, uv + vec2(stepSize.x, 0.0)).rgb * .12;
-      blurred += texture2D(tDiffuse, uv - vec2(stepSize.x, 0.0)).rgb * .12;
-      blurred += texture2D(tDiffuse, uv + vec2(0.0, stepSize.y)).rgb * .12;
-      blurred += texture2D(tDiffuse, uv - vec2(0.0, stepSize.y)).rgb * .12;
-      blurred += texture2D(tDiffuse, uv + stepSize).rgb * .08;
-      blurred += texture2D(tDiffuse, uv - stepSize).rgb * .08;
-      blurred += texture2D(tDiffuse, uv + vec2(stepSize.x, -stepSize.y)).rgb * .08;
-      blurred += texture2D(tDiffuse, uv + vec2(-stepSize.x, stepSize.y)).rgb * .08;
-      gl_FragColor = vec4(mix(blurred, color, .16), 1.0);
+      vec2 stepSize = texelSize * .45;
+      vec3 reflection = texture2D(tDiffuse, uv).rgb * .68;
+      reflection += texture2D(tDiffuse, uv + vec2(stepSize.x, 0.0)).rgb * .08;
+      reflection += texture2D(tDiffuse, uv - vec2(stepSize.x, 0.0)).rgb * .08;
+      reflection += texture2D(tDiffuse, uv + vec2(0.0, stepSize.y)).rgb * .08;
+      reflection += texture2D(tDiffuse, uv - vec2(0.0, stepSize.y)).rgb * .08;
+      gl_FragColor = vec4(mix(reflection, color, .055), 1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }
   `,
 }
 
+function createPoolPuzzleLadder() {
+  const ladder = new THREE.Group()
+  ladder.name = 'Pool puzzle half-height ladder'
+  ladder.position.set(-3.75, -1.21, .2)
+  ladder.scale.y = .001
+  ladder.visible = false
+  const metal = new THREE.MeshStandardMaterial({
+    name: 'Shared brushed ladder metal',
+    color: 0xd1dcdd,
+    emissive: 0x10191a,
+    emissiveIntensity: .32,
+    metalness: .58,
+    roughness: .2,
+  })
+  const railGeometry = new THREE.CylinderGeometry(.055, .055, 4.15, 10)
+  const rungGeometry = new THREE.CylinderGeometry(.043, .043, .66, 10)
+  for (const x of [-.3, .3]) {
+    const rail = new THREE.Mesh(railGeometry, metal)
+    rail.position.set(x, 2.075, 0)
+    rail.castShadow = true
+    ladder.add(rail)
+  }
+  for (let index = 0; index < 9; index += 1) {
+    const rung = new THREE.Mesh(rungGeometry, metal)
+    rung.rotation.z = Math.PI / 2
+    rung.position.y = .34 + index * .45
+    rung.castShadow = true
+    ladder.add(rung)
+  }
+  return ladder
+}
+
 export function preparePoolRoom(root) {
   const waterMaterial = createPoolWaterMaterial()
   const causticsMaterial = createPoolCausticsMaterial()
   let waterSurface = null
+  let exportedCeiling = null
+  let puzzleState = createPoolPuzzleState()
+  const duckTargetAngles = Object.fromEntries(POOL_DUCKS.map(({ id }) => [id, 0]))
+  const puzzleDucks = {}
+  let ladderProgress = 0
   const floatingParts = []
+  const puzzleDuckParts = Object.fromEntries(POOL_DUCKS.map(({ id }) => [id, []]))
   const hazeSize = 48
   const hazeData = new Uint8Array(hazeSize * hazeSize * 4)
   for (let y = 0; y < hazeSize; y += 1) {
@@ -228,11 +267,35 @@ export function preparePoolRoom(root) {
       object.material = waterMaterial
       waterSurface = object
     } else if (object.name === 'PoolCeiling') {
-      object.visible = false
+      exportedCeiling = object
     }
-    if (/^(RubberDuck|PinkSwimRing|YellowLifeRing|BlueInflatable|BeachBall)/.test(object.name)) {
+    const duckMatch = object.name.match(/^RubberDuck.*_([123])$/)
+    if (duckMatch) {
+      puzzleDuckParts[`duck-${duckMatch[1]}`].push(object)
+    } else if (/^(RubberDuck|PinkSwimRing|YellowLifeRing|BlueInflatable|BeachBall)/.test(object.name)) {
       floatingParts.push({ object, baseY: object.position.y, x: object.position.x, z: object.position.z })
     }
+  })
+  if (exportedCeiling) {
+    exportedCeiling.removeFromParent()
+    exportedCeiling.geometry?.dispose()
+  }
+  POOL_DUCKS.forEach(({ id, objectIndex }) => {
+    const puzzleDuck = new THREE.Group()
+    puzzleDuck.name = `Rotatable puzzle duck ${objectIndex}`
+    const parts = puzzleDuckParts[id]
+    const body = parts.find(({ name }) => name.startsWith('RubberDuckBody'))
+    if (body) puzzleDuck.position.copy(body.position)
+    root.add(puzzleDuck)
+    puzzleDuck.updateWorldMatrix(true, false)
+    parts.forEach((part) => puzzleDuck.attach(part))
+    puzzleDucks[id] = puzzleDuck
+    floatingParts.push({
+      object: puzzleDuck,
+      baseY: puzzleDuck.position.y,
+      x: puzzleDuck.position.x,
+      z: puzzleDuck.position.z,
+    })
   })
   const caustics = new THREE.Mesh(new THREE.PlaneGeometry(10.8, 14.8), causticsMaterial)
   caustics.name = 'Window-localized animated pool caustics'
@@ -242,25 +305,20 @@ export function preparePoolRoom(root) {
   root.add(caustics)
 
   const mirror = new Reflector(new THREE.PlaneGeometry(11.6, 15.6), {
-    name: 'Blurred pool ceiling mirror',
-    shader: blurredMirrorShader,
-    textureWidth: 256,
-    textureHeight: 256,
+    name: 'Clear pool ceiling mirror',
+    shader: clearMirrorShader,
+    textureWidth: 384,
+    textureHeight: 384,
     multisample: 0,
     clipBias: .004,
-    color: 0x9aa9a8,
+    color: 0xaeb8b7,
   })
-  mirror.name = 'Blurred pool ceiling mirror'
+  mirror.name = 'Clear pool ceiling mirror'
   mirror.rotation.x = Math.PI / 2
   mirror.position.y = 5.985
-  const renderMirror = mirror.onBeforeRender
-  let mirrorFrame = 0
-  mirror.onBeforeRender = function (...args) {
-    mirrorFrame += 1
-    if (mirrorFrame % 2) return
-    renderMirror.apply(this, args)
-  }
   root.add(mirror)
+  const ladder = createPoolPuzzleLadder()
+  root.add(ladder)
   const ambience = new THREE.HemisphereLight(0xa6dfe0, 0x18353b, 1.45)
   ambience.name = 'Pool ambience'
   const poolGlow = new THREE.PointLight(0x56d6df, 42, 13, 2)
@@ -291,11 +349,41 @@ export function preparePoolRoom(root) {
   return {
     root,
     waterSurface,
+    puzzleDucks,
+    ladder,
+    getPuzzleState: () => puzzleState,
+    rotateDuck(duckId) {
+      const nextState = rotatePoolDuck(puzzleState, duckId)
+      if (nextState === puzzleState) return puzzleState
+      puzzleState = nextState
+      duckTargetAngles[duckId] = puzzleState.ducks[duckId].angle
+      if (puzzleState.solved) ladder.visible = true
+      return puzzleState
+    },
+    isLadderReady: () => puzzleState.solved && ladderProgress >= .995,
+    getClimbPosition(side = 1) {
+      return new THREE.Vector3(ladder.position.x, 3.08, ladder.position.z + 1.65 * side)
+    },
+    getClimbBasePosition(eyeHeight, side = 1) {
+      return new THREE.Vector3(ladder.position.x, eyeHeight, ladder.position.z + 1.65 * side)
+    },
     update(deltaTime) {
       waterMaterial.uniforms.time.value += Math.min(deltaTime, .2)
       const time = waterMaterial.uniforms.time.value
       causticsMaterial.uniforms.time.value = time
       hazeMaterial.opacity = .058 + Math.sin(time * .42) * .01
+      POOL_DUCKS.forEach(({ id }) => {
+        puzzleDucks[id].rotation.y = THREE.MathUtils.damp(
+          puzzleDucks[id].rotation.y,
+          duckTargetAngles[id],
+          9,
+          deltaTime,
+        )
+      })
+      if (puzzleState.solved) {
+        ladderProgress = THREE.MathUtils.damp(ladderProgress, 1, 3.8, deltaTime)
+        ladder.scale.y = Math.max(.001, ladderProgress)
+      }
       floatingParts.forEach(({ object, baseY, x, z }) => {
         object.position.y = baseY + samplePoolWaveHeight(x, z, time) * .72
       })
