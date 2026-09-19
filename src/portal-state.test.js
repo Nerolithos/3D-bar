@@ -8,6 +8,7 @@ import {
   failPortalPreload,
   finishPortalEntry,
   requestPortalPreload,
+  reopenPortal,
   resolvePortalPreload,
   unlockPortal,
 } from './portal-state.js'
@@ -33,6 +34,7 @@ test('pool portal follows locked, preload, ready, entering and completed states'
   assert.equal(completed['pool-01'].status, 'completed')
   assert.strictEqual(requestPortalPreload(loading, 'pool-01'), loading)
   assert.strictEqual(beginPortalEntry(entering, 'pool-01'), entering)
+  assert.equal(reopenPortal(completed, 'pool-01')['pool-01'].status, 'ready')
 })
 
 test('failed pool preload is visible and retryable', () => {
@@ -45,4 +47,3 @@ test('failed pool preload is visible and retryable', () => {
   assert.equal(retry['pool-01'].status, 'loading')
   assert.equal(retry['pool-01'].error, null)
 })
-

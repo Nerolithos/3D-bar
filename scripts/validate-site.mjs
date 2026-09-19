@@ -13,6 +13,7 @@ const collisionSource = await readFile(path.join(root, 'src/door-collision.js'),
 const lifecycleSource = await readFile(path.join(root, 'src/scene-lifecycle.js'), 'utf8')
 const horrorSource = await readFile(path.join(root, 'src/horror-room.js'), 'utf8')
 const poolSource = await readFile(path.join(root, 'src/pool-room.js'), 'utf8')
+const poolElectricalSource = await readFile(path.join(root, 'src/pool-electrical.js'), 'utf8')
 const portalSource = await readFile(path.join(root, 'src/portal-state.js'), 'utf8')
 const routeSource = await readFile(path.join(root, 'src/app-route.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
@@ -22,7 +23,7 @@ const models = await readdir(modelDir).catch(() => [])
 const packagedModelName = 'cozy_bar_v008-e4ad253c.glb'
 const horrorModelName = 'horror_room_v001-62e06a81.glb'
 const poolModelName = 'pool_room_v001-2ee22a73.glb'
-const poolPreviewName = 'pool-portal-preview-7dea476f.jpg'
+const poolPreviewName = 'pool-portal-dagon-deac052c.jpg'
 const handprintName = 'tv-handprint-b6082550.jpg'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
@@ -96,7 +97,19 @@ const required = [
   'startPoolPortalPreload()',
   'enterPoolPortal(target.portalId)',
   'portalLifecycle.transition',
-  'poolController?.update(deltaTime)',
+  'poolController.update(deltaTime, { onFloat: poolOnFloat })',
+  "type: 'pool-tv-power'",
+  "type: 'pool-float'",
+  "type: 'future-portal-screen'",
+  'triggerPoolDeath()',
+  'returnFromPool({ escaped: true })',
+  'preserveCurrent: true',
+  'Second portal environmental glow',
+  'secondPortalScreenTarget',
+  '0xcfe8e5',
+  'createTelevisionTransition({ host })',
+  'televisionTransition.run(() =>',
+  'isPoolInteractionOccluder(object)',
 ]
 for (const token of required) {
   if (!source.includes(token)) throw new Error(`Missing required feature: ${token}`)
@@ -166,14 +179,17 @@ if (poolModelName !== `pool_room_v001-${digest(packagedPoolModel).slice(0, 8)}.g
 }
 const poolPreview = await readFile(path.join(root, 'public/textures', poolPreviewName))
 if (poolPreview.byteLength >= 100_000) throw new Error('Pool portal preview exceeds 100 KB')
-if (poolPreviewName !== `pool-portal-preview-${digest(poolPreview).slice(0, 8)}.jpg`) {
+if (poolPreviewName !== `pool-portal-dagon-${digest(poolPreview).slice(0, 8)}.jpg`) {
   throw new Error('Pool portal preview content hash mismatch')
 }
 for (const token of [poolModelName, poolPreviewName, "id: 'pool-01'", "screenName: 'CRTScreen_06'"]) {
   if (!portalSource.includes(token)) throw new Error(`Missing pool portal configuration: ${token}`)
 }
-for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'resolvePoolMove', 'resolveShortestAngle', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Clear pool ceiling mirror', 'textureWidth: 384', 'Pool puzzle half-height ladder', 'POOL_DUCKS', 'rotateDuck(duckId)', 'isLadderReady']) {
+for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'lightningArc', 'electricFbm', 'branchPath', 'resolvePoolMove', 'resolveShortestAngle', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Clear pool ceiling mirror', 'textureWidth: 384', 'Pool puzzle half-height ladder', 'POOL_DUCKS', 'rotateDuck(duckId)', 'isLadderReady', 'televisionBank', 'ignoreInteractionOcclusion', 'Whole pool television interaction anchor', "'#ff0000'"]) {
   if (!poolSource.includes(token)) throw new Error(`Missing pool room runtime feature: ${token}`)
+}
+for (const token of ['POOL_COUNTDOWN_SECONDS = 5', 'POOL_DISCHARGE_SECONDS = 3', "phase: 'countdown'", "phase: 'discharge'", "outcome: onFloat ? 'safe' : 'dead'", 'ladderExtension', 'secondTvUnlocked']) {
+  if (!poolElectricalSource.includes(token)) throw new Error(`Missing pool electrical puzzle state: ${token}`)
 }
 for (const token of ["type: 'pool-duck'", "type: 'pool-ladder'", 'poolClimbHeight', 'usePoolLadder', '点击沿梯子爬下去']) {
   if (!source.includes(token)) throw new Error(`Missing pool puzzle interaction: ${token}`)

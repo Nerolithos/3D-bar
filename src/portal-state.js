@@ -4,8 +4,8 @@ export const PORTALS = Object.freeze([
     screenName: 'CRTScreen_06',
     label: '泳池空间',
     modelUrl: '/models/pool_room_v001-2ee22a73.glb',
-    previewUrl: '/textures/pool-portal-preview-7dea476f.jpg',
-    oneWay: true,
+    previewUrl: '/textures/pool-portal-dagon-deac052c.jpg',
+    oneWay: false,
   }),
 ])
 
@@ -58,4 +58,8 @@ export function beginPortalEntry(state, portalId) {
 
 export function finishPortalEntry(state, portalId) {
   return state[portalId]?.status === 'entering' ? updatePortal(state, portalId, 'completed') : state
+}
+
+export function reopenPortal(state, portalId) {
+  return state[portalId]?.status === 'completed' ? updatePortal(state, portalId, 'ready') : state
 }

@@ -4,7 +4,7 @@ const VISUALS = Object.freeze({
   locked: { intensity: .05, color: 0x182226 },
   unlocked: { intensity: .35, color: 0x2d7380 },
   loading: { intensity: .75, color: 0x56b9c8 },
-  ready: { intensity: 2.8, color: 0xb7ffff },
+  ready: { intensity: .15, color: 0xb7ffff },
   error: { intensity: 1.5, color: 0xff3028 },
   entering: { intensity: 5.5, color: 0xd8ffff },
   completed: { intensity: 0, color: 0x000000 },
@@ -18,11 +18,12 @@ export function createPortalScreenController(screen, texture) {
   texture.colorSpace = THREE.SRGBColorSpace
   texture.minFilter = THREE.LinearMipmapLinearFilter
   texture.magFilter = THREE.LinearFilter
-  const material = new THREE.MeshStandardMaterial({
+  texture.repeat.set(4, 4)
+  texture.offset.set(-1.5, -2)
+  const material = new THREE.MeshBasicMaterial({
     name: 'Pool portal screen',
     map: texture,
-    emissiveMap: texture,
-    roughness: .38,
+    toneMapped: true,
   })
   screen.material = material
   return {
@@ -30,9 +31,9 @@ export function createPortalScreenController(screen, texture) {
     material,
     setStatus(status) {
       const visual = getPortalScreenVisual(status)
-      material.emissive.setHex(visual.color)
-      material.emissiveIntensity = visual.intensity
-      material.color.setScalar(status === 'error' ? .3 : status === 'ready' || status === 'entering' ? 1 : .55)
+      material.color.setHex(status === 'error' ? 0xff6666 : 0xffffff)
+      material.color.multiplyScalar(status === 'ready' ? .72 : status === 'entering' ? .9 : .42)
+      material.userData.portalVisual = visual
     },
   }
 }

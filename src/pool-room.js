@@ -1,9 +1,17 @@
 import * as THREE from 'three'
 import { Reflector } from 'three/addons/objects/Reflector.js'
+import {
+  advancePoolElectricalState,
+  createPoolElectricalState,
+  resetPoolElectricalAfterDeath,
+  startPoolElectricalSequence,
+  unlockSecondPoolTelevision,
+} from './pool-electrical.js'
 import { POOL_DUCKS, createPoolPuzzleState, rotatePoolDuck } from './pool-puzzle.js'
 
 export const POOL_BOUNDS = Object.freeze({ minX: -5.05, maxX: 5.05, minZ: -7.05, maxZ: 7.05 })
 export const POOL_COLUMN_RADIUS = 1.12
+const FULL_LADDER_SCALE = 1.73
 
 export function resolveShortestAngle(current, target) {
   return current + Math.atan2(Math.sin(target - current), Math.cos(target - current))
@@ -47,6 +55,7 @@ export function createPoolWaterMaterial() {
       shallowColor: { value: new THREE.Color(0x62d5d2) },
       deepColor: { value: new THREE.Color(0x063a4b) },
       skyColor: { value: new THREE.Color(0xb8edf0) },
+      electricIntensity: { value: 0 },
     },
     vertexShader: `
       uniform float time;
@@ -92,9 +101,74 @@ export function createPoolWaterMaterial() {
       uniform vec3 shallowColor;
       uniform vec3 deepColor;
       uniform vec3 skyColor;
+      uniform float electricIntensity;
       varying vec3 vWorldPosition;
       varying vec3 vWorldNormal;
       varying float vWaveHeight;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+
+      float valueNoise(vec2 p) {
+        vec2 cell = floor(p);
+        vec2 local = fract(p);
+        local = local * local * (3.0 - 2.0 * local);
+        float a = hash21(cell);
+        float b = hash21(cell + vec2(1.0, 0.0));
+        float c = hash21(cell + vec2(0.0, 1.0));
+        float d = hash21(cell + vec2(1.0, 1.0));
+        return mix(mix(a, b, local.x), mix(c, d, local.x), local.y);
+      }
+
+      float electricFbm(vec2 p) {
+        float value = 0.0;
+        float amplitude = .5;
+        for (int octave = 0; octave < 4; octave++) {
+          value += valueNoise(p) * amplitude;
+          p = p * 2.03 + vec2(7.1, 3.7);
+          amplitude *= .5;
+        }
+        return value;
+      }
+
+      mat2 rotation2d(float angle) {
+        float sine = sin(angle);
+        float cosine = cos(angle);
+        return mat2(cosine, -sine, sine, cosine);
+      }
+
+      float lightningArc(vec2 worldPosition, float seed) {
+        float frame = floor(time * 11.0 + seed * 17.0);
+        vec2 randomPair = vec2(
+          hash21(vec2(frame, seed)),
+          hash21(vec2(seed + 9.4, frame + 3.7))
+        );
+        vec2 center = (randomPair - .5) * vec2(7.8, 10.8);
+        float angle = (hash21(vec2(frame + 11.0, seed)) - .5) * 6.2831853;
+        vec2 p = rotation2d(angle) * (worldPosition - center);
+        float coarseBend = (electricFbm(vec2(p.x * .72 + seed * 4.1, frame * .071)) - .5) * 1.55;
+        float sharpJitter = (valueNoise(vec2(p.x * 3.8 - seed, frame * .19)) - .5) * .38;
+        float path = coarseBend + sharpJitter;
+        float trunkDistance = abs(p.y - path);
+        float trunk = 1.0 - smoothstep(.018, .105, trunkDistance);
+        float lengthMask = 1.0 - smoothstep(2.8, 4.9, abs(p.x));
+
+        float branchOrigin = (hash21(vec2(frame, seed + 22.0)) - .5) * 2.4;
+        float branchDirection = hash21(vec2(seed + 4.0, frame)) > .5 ? 1.0 : -1.0;
+        float branchX = p.x - branchOrigin;
+        float branchPath = path + branchDirection * branchX * .52 +
+          (valueNoise(vec2(branchX * 4.6, frame * .23 + seed)) - .5) * .3;
+        float branch = 1.0 - smoothstep(.015, .085, abs(p.y - branchPath));
+        branch *= smoothstep(0.0, .22, branchX) * (1.0 - smoothstep(1.35, 2.75, branchX));
+
+        float flicker = step(.38, hash21(vec2(frame, seed * 31.0)));
+        float microFlicker = .58 + .42 * step(.22, hash21(vec2(floor(time * 37.0), seed)));
+        return (trunk + branch * .72) * lengthMask * flicker * microFlicker;
+      }
+
       void main() {
         vec3 normal = normalize(vWorldNormal);
         vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
@@ -109,10 +183,24 @@ export function createPoolWaterMaterial() {
         vec3 color = mix(deepColor, shallowColor, .57 + caustics * .12 + crest * .1);
         color = mix(color, skyColor, fresnel * .68);
         color += vec3(.82, .98, 1.0) * specular * 1.7;
+        vec2 electricPosition = vWorldPosition.xz;
+        float electricity = lightningArc(electricPosition, .17) +
+          lightningArc(electricPosition, 1.93) +
+          lightningArc(electricPosition, 4.71);
+        float electricCore = clamp(electricity, 0.0, 1.0);
+        float electricHalo = pow(clamp(electricity, 0.0, 1.5), .36) * .42;
+        color += vec3(.38, .93, 1.28) * (electricCore * 2.4 + electricHalo) * electricIntensity;
         gl_FragColor = vec4(color, .74 + fresnel * .16);
       }
     `,
   })
+}
+
+export function isPoolInteractionOccluder(object) {
+  if (!object?.isMesh || object.userData.ignoreInteractionOcclusion) return false
+  const materials = Array.isArray(object.material) ? object.material : [object.material]
+  const labels = [object.name, ...materials.map((material) => material?.name ?? '')].join(' ')
+  return !/water/i.test(labels)
 }
 
 export function createPoolCausticsMaterial() {
@@ -223,12 +311,185 @@ function createPoolPuzzleLadder() {
   return ladder
 }
 
-export function preparePoolRoom(root) {
+function createPoolElectricalTelevision(root, sourceRoot) {
+  const televisionModel = sourceRoot?.clone(true) ?? new THREE.Group()
+  televisionModel.name = 'Submerged electrical television model'
+  const television = new THREE.Group()
+  television.name = 'Submerged electrical television'
+  television.position.set(-3.6, -1.1, 5.75)
+  const televisionBank = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0),
+    THREE.MathUtils.degToRad(24),
+  )
+  const televisionYaw = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    Math.PI / 2,
+  )
+  const televisionLean = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 0, 1),
+    THREE.MathUtils.degToRad(13),
+  )
+  television.quaternion.copy(televisionLean).multiply(televisionBank).multiply(televisionYaw)
+  television.scale.setScalar(2.2)
+  television.add(televisionModel)
+  television.traverse((object) => {
+    if (object.isMesh) object.userData.ignoreInteractionOcclusion = true
+  })
+  root.add(television)
+
+  const screen = television.getObjectByName('TVScreen')
+  const glass = television.getObjectByName('tvScreenGlass_Glass_0')
+  if (glass) glass.visible = false
+  let screenContext = null
+  let screenTexture = null
+  if (screen?.isMesh && typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas')
+    canvas.width = 256
+    canvas.height = 160
+    screenContext = canvas.getContext('2d')
+    screenTexture = new THREE.CanvasTexture(canvas)
+    screenTexture.colorSpace = THREE.SRGBColorSpace
+    screen.material = new THREE.MeshStandardMaterial({
+      name: 'Pool countdown television screen',
+      map: screenTexture,
+      emissiveMap: screenTexture,
+      emissive: 0xff0000,
+      emissiveIntensity: 5.5,
+      roughness: .35,
+      side: THREE.DoubleSide,
+    })
+  }
+
+  const powerControl = television.getObjectByName('tvDial') ??
+    television.getObjectByName('tvKnobs') ?? television
+  television.updateMatrixWorld(true)
+  const powerAnchor = new THREE.Object3D()
+  powerAnchor.name = 'Pool television power control'
+  powerControl.getWorldPosition(powerAnchor.position)
+  root.worldToLocal(powerAnchor.position)
+  root.add(powerAnchor)
+
+  const interactionBounds = new THREE.Box3().setFromObject(television)
+  const interactionAnchor = new THREE.Object3D()
+  interactionAnchor.name = 'Whole pool television interaction anchor'
+  interactionBounds.getCenter(interactionAnchor.position)
+  root.worldToLocal(interactionAnchor.position)
+  root.add(interactionAnchor)
+  const interactionSize = interactionBounds.getSize(new THREE.Vector3()).addScalar(.42)
+  interactionSize.set(
+    Math.max(interactionSize.x, 2.8),
+    Math.max(interactionSize.y, 2.4),
+    Math.max(interactionSize.z, 1.8),
+  )
+
+  const smokeGroup = new THREE.Group()
+  smokeGroup.name = 'Pool television smoke'
+  smokeGroup.position.set(-3.6, -.14, 6.2)
+  const smokeData = new Uint8Array(32 * 32 * 4)
+  for (let y = 0; y < 32; y += 1) {
+    for (let x = 0; x < 32; x += 1) {
+      const offset = (y * 32 + x) * 4
+      const distance = Math.hypot(x / 15.5 - 1, y / 15.5 - 1)
+      smokeData[offset] = 150
+      smokeData[offset + 1] = 160
+      smokeData[offset + 2] = 164
+      smokeData[offset + 3] = Math.round(Math.max(0, 1 - distance) ** 2 * 180)
+    }
+  }
+  const smokeTexture = new THREE.DataTexture(smokeData, 32, 32, THREE.RGBAFormat)
+  smokeTexture.needsUpdate = true
+  const smokeMaterial = new THREE.SpriteMaterial({
+    name: 'Shared television smoke',
+    map: smokeTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  })
+  for (let index = 0; index < 5; index += 1) {
+    const puff = new THREE.Sprite(smokeMaterial)
+    puff.position.set((index % 2 ? 1 : -1) * .06, index * .1, (index - 2) * .035)
+    puff.scale.setScalar(.22 + index * .045)
+    smokeGroup.add(puff)
+  }
+  root.add(smokeGroup)
+
+  const sparkPositions = new Float32Array([
+    -.34, 0, 0, .34, 0, 0, 0, -.25, -.18, 0, .28, .18,
+    -.25, -.18, .14, .27, .2, -.12, -.16, .28, -.16, .18, -.3, .18,
+  ])
+  const sparkGeometry = new THREE.BufferGeometry()
+  sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3))
+  const sparkMaterial = new THREE.LineBasicMaterial({
+    name: 'Pool electric arcs',
+    color: 0xd8ffff,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+  })
+  const sparks = new THREE.LineSegments(sparkGeometry, sparkMaterial)
+  sparks.name = 'Pool television electric arcs'
+  sparks.position.set(-3.6, -.38, 6.05)
+  root.add(sparks)
+  const sparkLight = new THREE.PointLight(0xb9ffff, 0, 7, 2)
+  sparkLight.position.set(-3.6, -.08, 6.08)
+  root.add(sparkLight)
+
+  let lastFrame = ''
+  function drawScreen(phase, countdownValue) {
+    if (!screenContext || !screenTexture) return
+    const frame = `${phase}:${countdownValue}`
+    if (frame === lastFrame && phase !== 'discharge') return
+    lastFrame = frame
+    screenContext.fillStyle = phase === 'idle' ? '#120000' : '#ff0000'
+    screenContext.fillRect(0, 0, 256, 160)
+    if (phase === 'countdown') {
+      screenContext.fillStyle = '#160000'
+      screenContext.textAlign = 'center'
+      screenContext.textBaseline = 'middle'
+      screenContext.font = 'bold 116px monospace'
+      screenContext.fillText(String(countdownValue), 128, 86)
+    } else if (phase === 'discharge') {
+      screenContext.strokeStyle = '#fff'
+      screenContext.lineWidth = 5
+      for (let index = 0; index < 7; index += 1) {
+        screenContext.beginPath()
+        screenContext.moveTo(Math.random() * 256, Math.random() * 160)
+        screenContext.lineTo(Math.random() * 256, Math.random() * 160)
+        screenContext.stroke()
+      }
+    }
+    screenTexture.needsUpdate = true
+  }
+  drawScreen('idle', 5)
+
+  return {
+    root: television,
+    screen,
+    powerAnchor,
+    interactionAnchor,
+    interactionSize,
+    update(state, time) {
+      drawScreen(state.phase, state.countdownValue)
+      const active = state.phase === 'discharge'
+      sparkMaterial.opacity = active && Math.sin(time * 48) > -.2 ? .9 : 0
+      sparks.rotation.y = time * 5.7
+      sparks.scale.setScalar(.8 + Math.abs(Math.sin(time * 31)) * .7)
+      sparkLight.intensity = active ? 22 + Math.abs(Math.sin(time * 43)) * 40 : 0
+      smokeMaterial.opacity = active ? .18 : THREE.MathUtils.damp(smokeMaterial.opacity, 0, 2.5, 1 / 60)
+      smokeGroup.children.forEach((puff, index) => {
+        puff.position.y = index * .1 + (time * (.06 + index * .007)) % .55
+      })
+    },
+  }
+}
+
+export function preparePoolRoom(root, televisionSource = null) {
   const waterMaterial = createPoolWaterMaterial()
   const causticsMaterial = createPoolCausticsMaterial()
   let waterSurface = null
   let exportedCeiling = null
   let puzzleState = createPoolPuzzleState()
+  let electricalState = createPoolElectricalState()
   const duckTargetAngles = Object.fromEntries(POOL_DUCKS.map(({ id }) => [id, 0]))
   const puzzleDucks = {}
   let ladderProgress = 0
@@ -319,6 +580,16 @@ export function preparePoolRoom(root) {
   root.add(mirror)
   const ladder = createPoolPuzzleLadder()
   root.add(ladder)
+  const electricalTelevision = createPoolElectricalTelevision(root, televisionSource)
+  const blueFloat = root.getObjectByName('BlueInflatableMattress')
+  const blueFloatAnchor = new THREE.Object3D()
+  blueFloatAnchor.name = 'Blue float interaction anchor'
+  if (blueFloat) {
+    root.updateMatrixWorld(true)
+    new THREE.Box3().setFromObject(blueFloat).getCenter(blueFloatAnchor.position)
+    root.worldToLocal(blueFloatAnchor.position)
+  }
+  root.add(blueFloatAnchor)
   const ambience = new THREE.HemisphereLight(0xa6dfe0, 0x18353b, 1.45)
   ambience.name = 'Pool ambience'
   const poolGlow = new THREE.PointLight(0x56d6df, 42, 13, 2)
@@ -351,7 +622,23 @@ export function preparePoolRoom(root) {
     waterSurface,
     puzzleDucks,
     ladder,
+    blueFloat,
+    blueFloatAnchor,
+    electricalTelevision,
     getPuzzleState: () => puzzleState,
+    getElectricalState: () => electricalState,
+    startElectricalSequence() {
+      electricalState = startPoolElectricalSequence(electricalState)
+      return electricalState
+    },
+    resetElectricalAfterDeath() {
+      electricalState = resetPoolElectricalAfterDeath(electricalState)
+      return electricalState
+    },
+    unlockSecondTelevision() {
+      electricalState = unlockSecondPoolTelevision(electricalState)
+      return electricalState
+    },
     rotateDuck(duckId) {
       const nextState = rotatePoolDuck(puzzleState, duckId)
       if (nextState === puzzleState) return puzzleState
@@ -361,15 +648,22 @@ export function preparePoolRoom(root) {
       return puzzleState
     },
     isLadderReady: () => puzzleState.solved && ladderProgress >= .995,
+    isFullLadderReady: () => puzzleState.solved && electricalState.ladderExtension >= .995,
     getClimbPosition(side = 1) {
-      return new THREE.Vector3(ladder.position.x, 3.08, ladder.position.z + 1.65 * side)
+      const height = electricalState.ladderExtension >= .995 ? 6.16 : 3.08
+      return new THREE.Vector3(ladder.position.x, height, ladder.position.z + 1.65 * side)
     },
     getClimbBasePosition(eyeHeight, side = 1) {
       return new THREE.Vector3(ladder.position.x, eyeHeight, ladder.position.z + 1.65 * side)
     },
-    update(deltaTime) {
+    update(deltaTime, { onFloat = false } = {}) {
       waterMaterial.uniforms.time.value += Math.min(deltaTime, .2)
       const time = waterMaterial.uniforms.time.value
+      const previousElectricalState = electricalState
+      electricalState = advancePoolElectricalState(electricalState, deltaTime, {
+        onFloat,
+        firstPuzzleSolved: puzzleState.solved,
+      })
       causticsMaterial.uniforms.time.value = time
       hazeMaterial.opacity = .058 + Math.sin(time * .42) * .01
       POOL_DUCKS.forEach(({ id }) => {
@@ -382,11 +676,22 @@ export function preparePoolRoom(root) {
       })
       if (puzzleState.solved) {
         ladderProgress = THREE.MathUtils.damp(ladderProgress, 1, 3.8, deltaTime)
-        ladder.scale.y = Math.max(.001, ladderProgress)
+        const fullScale = 1 + electricalState.ladderExtension * (FULL_LADDER_SCALE - 1)
+        ladder.scale.y = Math.max(.001, ladderProgress * fullScale)
       }
+      const electricalIntensity = electricalState.phase === 'discharge'
+        ? .55 + Math.abs(Math.sin(time * 37)) * .9
+        : 0
+      waterMaterial.uniforms.electricIntensity.value = electricalIntensity
+      electricalTelevision.update(electricalState, time)
       floatingParts.forEach(({ object, baseY, x, z }) => {
         object.position.y = baseY + samplePoolWaveHeight(x, z, time) * .72
       })
+      return {
+        state: electricalState,
+        dischargeStarted: previousElectricalState.phase !== 'discharge' && electricalState.phase === 'discharge',
+        dischargeEnded: previousElectricalState.phase === 'discharge' && electricalState.phase === 'complete',
+      }
     },
   }
 }

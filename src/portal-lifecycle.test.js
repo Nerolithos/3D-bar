@@ -47,3 +47,22 @@ test('portal transition runs once and disposes the previous scene', async () => 
   assert.equal(pool.visible, true)
 })
 
+test('reversible portal preserves the horror room and reuses the preloaded pool', async () => {
+  const removed = []
+  const added = []
+  const horror = root('horror')
+  const pool = root('pool')
+  const lifecycle = createPortalLifecycle({
+    scene: { add: (value) => added.push(value), remove: (value) => removed.push(value) },
+    loadPortal: async () => pool,
+  })
+  lifecycle.setCurrentRoots([horror])
+  await lifecycle.preload('pool-01')
+  assert.equal(lifecycle.transition('pool-01', { preserveCurrent: true }), true)
+  assert.equal(horror.visible, false)
+  assert.equal(lifecycle.returnToPrevious(), true)
+  assert.equal(pool.visible, false)
+  assert.equal(horror.visible, true)
+  assert.equal(lifecycle.transition('pool-01', { preserveCurrent: true }), true)
+  assert.deepEqual(added, [pool, horror, pool])
+})

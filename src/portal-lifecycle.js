@@ -4,6 +4,8 @@ export function createPortalLifecycle({ scene, loadPortal }) {
   const loadPromises = new Map()
   const roots = new Map()
   let currentRoots = []
+  let preservedRoots = []
+  let activePortalId = null
   let transitioned = false
 
   return {
@@ -29,7 +31,7 @@ export function createPortalLifecycle({ scene, loadPortal }) {
     getRoot(portalId) {
       return roots.get(portalId) ?? null
     },
-    transition(portalId, { clearCollections = [] } = {}) {
+    transition(portalId, { clearCollections = [], preserveCurrent = false } = {}) {
       const nextRoot = roots.get(portalId)
       if (transitioned || !nextRoot) return false
       transitioned = true
@@ -41,14 +43,35 @@ export function createPortalLifecycle({ scene, loadPortal }) {
       currentRoots.forEach((root) => {
         scene.remove(root)
         root.removeFromParent?.()
-        disposeObjectTree(root, disposedResources)
+        if (preserveCurrent) root.visible = false
+        else disposeObjectTree(root, disposedResources)
       })
+      preservedRoots = preserveCurrent ? [...currentRoots] : []
       currentRoots = []
       clearCollections.forEach((collection) => { collection.length = 0 })
       nextRoot.visible = true
       scene.add(nextRoot)
+      activePortalId = portalId
+      return true
+    },
+    returnToPrevious({ clearCollections = [] } = {}) {
+      if (!transitioned || !preservedRoots.length || !activePortalId) return false
+      const activeRoot = roots.get(activePortalId)
+      if (activeRoot) {
+        scene.remove(activeRoot)
+        activeRoot.removeFromParent?.()
+        activeRoot.visible = false
+      }
+      preservedRoots.forEach((root) => {
+        root.visible = true
+        scene.add(root)
+      })
+      currentRoots = [...preservedRoots]
+      preservedRoots = []
+      clearCollections.forEach((collection) => { collection.length = 0 })
+      activePortalId = null
+      transitioned = false
       return true
     },
   }
 }
-

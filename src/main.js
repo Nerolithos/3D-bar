@@ -32,9 +32,15 @@ import {
 } from './horror-room.js'
 import { createSceneLifecycle } from './scene-lifecycle.js'
 import { createTvProp } from './tv-prop.js'
-import { preparePoolRoom, resolvePoolMove, resolveShortestAngle } from './pool-room.js'
+import {
+  isPoolInteractionOccluder,
+  preparePoolRoom,
+  resolvePoolMove,
+  resolveShortestAngle,
+} from './pool-room.js'
 import { createPortalScreenController } from './portal-screen.js'
 import { createPortalLifecycle } from './portal-lifecycle.js'
+import { createTelevisionTransition } from './television-transition.js'
 import {
   PORTALS,
   beginPortalEntry,
@@ -42,6 +48,7 @@ import {
   failPortalPreload,
   finishPortalEntry,
   requestPortalPreload,
+  reopenPortal,
   resolvePortalPreload,
   unlockPortal,
 } from './portal-state.js'
@@ -82,6 +89,7 @@ host.prepend(renderer.domElement)
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x030507)
+const televisionTransition = createTelevisionTransition({ host })
 const ambientLight = new THREE.HemisphereLight(0x304d73, 0x160a04, .34)
 scene.add(ambientLight)
 RectAreaLightUniformsLib.init()
@@ -174,10 +182,17 @@ let sceneLifecycle = null
 let portalLifecycle = null
 let portalState = createPortalState()
 let portalScreen = null
+let secondPortalScreen = null
+let secondPortalScreenTarget = null
+let portalGlow = null
+let secondPortalGlow = null
+let portalArtworkTexture = null
 let poolMode = false
 let poolController = null
 let poolClimbHeight = null
 let poolLadderSide = 1
+let poolOnFloat = false
+let poolDeathPending = false
 camera.position.copy(startPosition)
 
 function interactionState() {
@@ -205,7 +220,8 @@ function clampPosition(position) {
     position.x = resolved.x
     position.z = resolved.z
   }
-  position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight : EYE_HEIGHT
+  position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight :
+    poolMode && poolOnFloat ? 2.04 : EYE_HEIGHT
   return position
 }
 
@@ -223,7 +239,8 @@ function tryMove(delta) {
   if (!hitsCounter(candidateX)) camera.position.copy(candidateX)
   const candidateZ = clampPosition(camera.position.clone().add(new THREE.Vector3(0, 0, delta.z)))
   if (!hitsCounter(candidateZ)) camera.position.copy(candidateZ)
-  camera.position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight : EYE_HEIGHT
+  camera.position.y = poolMode && poolClimbHeight !== null ? poolClimbHeight :
+    poolMode && poolOnFloat ? 2.04 : EYE_HEIGHT
   if (!horrorMode && crossedDoorThreshold(camera.position)) enterHorrorRoom()
 }
 
@@ -254,13 +271,17 @@ function registerInteraction(candidate, size, offset = [0, 0, 0]) {
     proxy.userData.interactionCandidates = []
     candidate.object.add(proxy)
     candidate.object.userData.clickProxy = proxy
+  }
+  if (!interactionHitObjects.includes(proxy)) {
+    proxy.userData.interactionCandidates = []
     interactionHitObjects.push(proxy)
   }
   proxy.userData.interactionCandidates.push(candidate)
 }
 
 function updateMovement(deltaTime) {
-  if (seatedAt || dialMode || keypadMode || cameraTransition || poolClimbHeight !== null) return
+  if (seatedAt || dialMode || keypadMode || cameraTransition || televisionTransition.running ||
+      poolClimbHeight !== null || poolOnFloat || poolDeathPending) return
   const forwardAmount = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0)
   const rightAmount = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
   if (forwardAmount || rightAmount) {
@@ -378,14 +399,18 @@ function promptFor(candidate) {
     return '点击将 wet 纸条放入水中'
   }
   if (candidate.type === 'pool-ladder' && poolClimbHeight !== null) return '点击沿梯子爬下去'
+  if (candidate.type === 'pool-float' && poolOnFloat) return '点击从蓝色浮板回到水中'
   return candidate.prompt
 }
 
 function findInteractionTarget(clientX, clientY) {
-  if (dialMode || keypadMode || cameraTransition) return null
+  if (dialMode || keypadMode || cameraTransition || televisionTransition.running || poolDeathPending) return null
   if (seatedAt) return { type: 'stand', object: seatedAt, prompt: '点击起身' }
   if (poolClimbHeight !== null && poolController?.isLadderReady()) {
     return { type: 'pool-ladder', object: poolController.ladder, prompt: '点击沿梯子爬下去' }
+  }
+  if (poolOnFloat && poolController?.getElectricalState().phase !== 'discharge') {
+    return { type: 'pool-float', object: poolController.blueFloatAnchor, prompt: '点击从蓝色浮板回到水中' }
   }
   if (touchMode) setPointerFromEvent(clientX, clientY)
   else pointer.set(0, 0)
@@ -438,6 +463,64 @@ function standUp() {
   interactionTarget = { type: 'seat', object: seat, prompt: '点击坐下' }
 }
 
+function usePoolFloat() {
+  if (!poolController?.blueFloatAnchor || cameraTransition) return
+  const electrical = poolController.getElectricalState()
+  if (poolOnFloat) {
+    if (electrical.phase === 'discharge') {
+      status.textContent = '漏电尚未结束，留在浮板上！'
+      return
+    }
+    const destination = poolController.blueFloatAnchor.getWorldPosition(new THREE.Vector3())
+    destination.x += destination.x >= 0 ? -.95 : .95
+    destination.z += destination.z >= 0 ? -.55 : .55
+    destination.y = EYE_HEIGHT
+    poolOnFloat = false
+    setCameraTransition(destination, () => {
+      status.textContent = '已回到水中'
+    }, { duration: .72, targetPitch: -.08, pitchArc: -.08 })
+    return
+  }
+  if (electrical.phase === 'discharge') return
+  const destination = poolController.blueFloatAnchor.getWorldPosition(new THREE.Vector3())
+  destination.y = 2.04
+  status.textContent = '正在爬上蓝色浮板...'
+  setCameraTransition(destination, () => {
+    poolOnFloat = true
+    status.textContent = electrical.phase === 'countdown' ? '待在浮板上，避免接触池水' : '已站上绝缘浮板'
+  }, { duration: .82, targetPitch: -.22, pitchArc: -.08 })
+}
+
+function returnFromPool({ escaped = false } = {}) {
+  if (!poolMode || !portalLifecycle.returnToPrevious({
+    clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
+  })) return false
+  if (escaped) poolController.unlockSecondTelevision()
+  poolMode = false
+  poolOnFloat = false
+  poolClimbHeight = null
+  poolDeathPending = false
+  portalState = reopenPortal(portalState, PORTALS[0].id)
+  host.classList.remove('is-pool', 'is-electrified')
+  activateHorrorRoom({ returning: true, escaped })
+  return true
+}
+
+function triggerPoolDeath() {
+  if (poolDeathPending) return
+  poolDeathPending = true
+  cameraTransition = null
+  walkTarget = null
+  keys.clear()
+  host.classList.add('is-dead')
+  status.textContent = '漏电击中了池水……'
+  setTimeout(() => {
+    poolController?.resetElectricalAfterDeath()
+    host.classList.remove('is-dead', 'is-electrified')
+    returnFromPool()
+  }, 1650)
+}
+
 function usePoolLadder() {
   if (poolClimbHeight === null) {
     poolLadderSide = camera.position.z >= poolController.ladder.position.z ? 1 : -1
@@ -459,7 +542,12 @@ function usePoolLadder() {
     status.textContent = '正在沿梯子攀爬...'
     setCameraTransition(top, () => {
       poolClimbHeight = top.y
-      status.textContent = '已爬到第一段梯子的顶部，再次点击可爬下去'
+      if (poolController.isFullLadderReady()) {
+        status.textContent = '你向上穿过镜面，回到了恐怖房间'
+        returnFromPool({ escaped: true })
+      } else {
+        status.textContent = '已爬到第一段梯子的顶部，再次点击可爬下去'
+      }
     }, { duration: 1.45, targetYaw: ladderYaw, targetPitch: -.08, pitchArc: .025 })
   }, { duration: .6, targetYaw: ladderYaw, targetPitch: -.04, pitchArc: .035 })
 }
@@ -558,6 +646,14 @@ function performInteraction(target = interactionTarget) {
   if (target.type === 'pool-ladder' && poolController?.isLadderReady()) {
     usePoolLadder()
   }
+  if (target.type === 'pool-tv-power' && poolController) {
+    const electrical = poolController.startElectricalSequence()
+    if (electrical.phase === 'countdown') status.textContent = '电视启动：5 秒后池水通电'
+  }
+  if (target.type === 'pool-float' && poolController) usePoolFloat()
+  if (target.type === 'future-portal-screen') {
+    status.textContent = '第二个 Portal 已解锁，但尚未连接目标空间'
+  }
   if (target.type === 'door-card-slot') {
     const nextState = insertCiderCard(gameState)
     if (nextState !== gameState) {
@@ -626,6 +722,19 @@ function updateHorrorStatic(deltaTime) {
   texture.needsUpdate = true
 }
 
+function createPortalAmbientLight(root, screen, name) {
+  root.updateMatrixWorld(true)
+  const position = screen.getWorldPosition(new THREE.Vector3())
+  root.worldToLocal(position)
+  const inward = new THREE.Vector3(0, 1.35, 0).sub(position)
+  const light = new THREE.PointLight(0xff2838, 0, 4.6, 2)
+  light.name = name
+  light.position.copy(position).add(inward.normalize().multiplyScalar(.3))
+  light.castShadow = false
+  root.add(light)
+  return light
+}
+
 function prepareHorrorRoom(root, portalTexture) {
   horrorStatic = createHorrorStaticMaterial()
   const replacedMaterials = new Set()
@@ -644,15 +753,42 @@ function prepareHorrorRoom(root, portalTexture) {
   const portalConfig = PORTALS[0]
   const screen = root.getObjectByName(portalConfig.screenName)
   if (!screen) throw new Error(`Missing portal screen: ${portalConfig.screenName}`)
+  portalArtworkTexture = portalTexture
   portalScreen = createPortalScreenController(screen, portalTexture)
+  secondPortalScreenTarget = root.getObjectByName('CRTScreen_07')
+  secondPortalScreen = null
+  portalGlow = createPortalAmbientLight(root, screen, 'Pool portal environmental glow')
+  secondPortalGlow = secondPortalScreenTarget
+    ? createPortalAmbientLight(root, secondPortalScreenTarget, 'Second portal environmental glow')
+    : null
   syncPortalScreen()
+  syncSecondPortalScreen()
   addHorrorScreenLights(root)
   root.name = 'HorrorRoom'
   return root
 }
 
 function syncPortalScreen() {
-  portalScreen?.setStatus(portalState[PORTALS[0].id].status)
+  const portalStatus = portalState[PORTALS[0].id].status
+  portalScreen?.setStatus(portalStatus)
+  if (portalGlow) portalGlow.intensity = {
+    loading: 7,
+    ready: 16,
+    error: 11,
+    entering: 28,
+  }[portalStatus] ?? 0
+}
+
+function syncSecondPortalScreen() {
+  const unlocked = Boolean(poolController?.getElectricalState().secondTvUnlocked)
+  if (unlocked && !secondPortalScreen && secondPortalScreenTarget && portalArtworkTexture) {
+    secondPortalScreen = createPortalScreenController(secondPortalScreenTarget, portalArtworkTexture)
+  }
+  secondPortalScreen?.setStatus(unlocked ? 'ready' : 'locked')
+  if (secondPortalGlow) {
+    secondPortalGlow.color.setHex(unlocked ? 0xff2838 : 0xcfe8e5)
+    secondPortalGlow.intensity = unlocked ? 16 : 10
+  }
 }
 
 function startPoolPortalPreload() {
@@ -681,14 +817,13 @@ function activatePoolRoom(portalId) {
   poolMode = true
   poolClimbHeight = null
   poolLadderSide = 1
+  poolOnFloat = false
+  poolDeathPending = false
   horrorMode = false
   horrorDoorPivot = null
-  horrorStatic = null
-  portalScreen = null
   root.traverse((object) => {
     if (!object.isMesh) return
-    if (object.name !== 'PoolWaterSurface' &&
-        !object.name.startsWith('WaterJet') &&
+    if (isPoolInteractionOccluder(object) &&
         !/^RubberDuck.*_[123]$/.test(object.name)) occlusionObjects.push(object)
     if (object.name.startsWith('PoolWalkway') || object.name === 'PoolWaterSurface') floorTargets.push(object)
   })
@@ -702,7 +837,7 @@ function activatePoolRoom(portalId) {
   renderer.toneMappingExposure = .68
   shadowFramesRemaining = 2
   renderer.shadowMap.autoUpdate = true
-  host.classList.remove('is-horror', 'is-portal-pulling')
+  host.classList.remove('is-horror')
   host.classList.add('is-pool')
   status.textContent = '泳池空间已载入'
   portalState = finishPortalEntry(portalState, portalId)
@@ -719,31 +854,46 @@ function activatePoolRoom(portalId) {
     prompt: '点击爬到梯子顶部',
     get disabled() { return !poolController.isLadderReady() },
   }, [.82, 4.15, .68], [0, 2.075, 0])
+  registerInteraction({
+    type: 'pool-tv-power',
+    object: poolController.electricalTelevision.interactionAnchor,
+    prompt: '点击电视任意位置开机（5 秒后漏电）',
+    get disabled() {
+      const electrical = poolController.getElectricalState()
+      return electrical.phase !== 'idle' &&
+        !(electrical.phase === 'complete' && electrical.ladderExtension < 1)
+    },
+  }, poolController.electricalTelevision.interactionSize.toArray())
+  registerInteraction({
+    type: 'pool-float',
+    object: poolController.blueFloatAnchor,
+    prompt: '点击爬上蓝色浮板',
+    get disabled() {
+      return !poolController.blueFloat ||
+        (poolController.getElectricalState().phase === 'discharge' && !poolOnFloat)
+    },
+  }, [1.9, .48, 1.25])
   applyLook()
 }
 
 function enterPoolPortal(portalId) {
-  if (!horrorMode || portalState[portalId]?.status !== 'ready' || cameraTransition) return
+  if (!horrorMode || portalState[portalId]?.status !== 'ready' || cameraTransition || televisionTransition.running) return
   portalState = beginPortalEntry(portalState, portalId)
   syncPortalScreen()
-  host.classList.add('is-portal-pulling')
-  const screenPosition = portalScreen.screen.getWorldPosition(new THREE.Vector3())
-  const toScreen = screenPosition.clone().sub(camera.position)
-  const horizontal = Math.hypot(toScreen.x, toScreen.z)
-  const destination = screenPosition.clone().lerp(camera.position, .08)
-  const targetYaw = Math.atan2(-toScreen.x, -toScreen.z)
-  const targetPitch = Math.atan2(toScreen.y, horizontal)
-  setCameraTransition(destination, () => {
+  keys.clear()
+  walkTarget = null
+  televisionTransition.run(() => {
     const horrorRoot = sceneLifecycle.getHorrorRoot()
     portalLifecycle.setCurrentRoots([horrorRoot])
     if (!portalLifecycle.transition(portalId, {
       clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
+      preserveCurrent: true,
     })) {
-      host.classList.remove('is-portal-pulling')
-      return
+      return false
     }
     activatePoolRoom(portalId)
-  }, { duration: 1.3, targetYaw, targetPitch, pitchArc: -.16 })
+    return true
+  })
 }
 
 function startHorrorPreload() {
@@ -787,7 +937,7 @@ function collectBarRoots() {
   return [...new Set(roots.filter(Boolean))]
 }
 
-function activateHorrorRoom() {
+function activateHorrorRoom({ returning = false, escaped = false } = {}) {
   horrorMode = true
   doorPassable = false
   gameState = { ...gameState, door: { ...gameState.door, entered: true } }
@@ -817,7 +967,8 @@ function activateHorrorRoom() {
   pitch = 0
   scene.background.setHex(0x010202)
   host.classList.add('is-loaded', 'is-horror')
-  status.textContent = '恐怖房间已载入'
+  status.textContent = escaped ? '你穿过镜子回到了恐怖房间，第二台电视已经亮起' :
+    returning ? '你在恐怖房间重新醒来，泳池进度已保留' : '恐怖房间已载入'
   renderGameState()
   applyLook()
   const portal = PORTALS[0]
@@ -828,6 +979,13 @@ function activateHorrorRoom() {
     portalId: portal.id,
     object: portalScreen.screen,
     prompt: '点击进入泳池空间',
+  }, [.9, .62, .16])
+  syncSecondPortalScreen()
+  if (secondPortalScreen) registerInteraction({
+    type: 'future-portal-screen',
+    object: secondPortalScreen.screen,
+    prompt: '点击第二个 Portal（目标空间尚未连接）',
+    get disabled() { return !poolController?.getElectricalState().secondTvUnlocked },
   }, [.9, .62, .16])
   startPoolPortalPreload()
 }
@@ -853,13 +1011,22 @@ function resize() {
 
 const roomLoader = new GLTFLoader()
 roomLoader.setMeshoptDecoder(MeshoptDecoder)
+let sharedTelevisionPromise = null
+function loadSharedTelevision() {
+  sharedTelevisionPromise ??= roomLoader.loadAsync(HORROR_TV_MODEL_URL)
+  return sharedTelevisionPromise
+}
 portalLifecycle = createPortalLifecycle({
   scene,
   loadPortal: async (portalId, onProgress) => {
     const config = PORTALS.find(({ id }) => id === portalId)
     if (!config) throw new Error(`Unknown portal: ${portalId}`)
-    const gltf = await roomLoader.loadAsync(config.modelUrl, onProgress)
-    poolController = preparePoolRoom(gltf.scene)
+    const [gltf, televisionGltf] = await Promise.all([
+      roomLoader.loadAsync(config.modelUrl, onProgress),
+      loadSharedTelevision(),
+    ])
+    const televisionRoot = televisionGltf.scene.getObjectByName('TVRoot') ?? televisionGltf.scene
+    poolController = preparePoolRoom(gltf.scene, televisionRoot)
     return poolController.root
   },
 })
@@ -868,7 +1035,7 @@ sceneLifecycle = createSceneLifecycle({
   loadHorrorRoom: async (onProgress) => {
     const [roomGltf, televisionGltf, portalTexture] = await Promise.all([
       roomLoader.loadAsync('/models/horror_room_v001-62e06a81.glb', onProgress),
-      roomLoader.loadAsync(HORROR_TV_MODEL_URL),
+      loadSharedTelevision(),
       new THREE.TextureLoader().loadAsync(PORTALS[0].previewUrl),
     ])
     const televisionRoot = televisionGltf.scene.getObjectByName('TVRoot') ?? televisionGltf.scene
@@ -1138,7 +1305,20 @@ renderer.setAnimationLoop(() => {
   updateExitDoorAnimation(deltaTime)
   if (horrorMode) updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)
   updateHorrorStatic(deltaTime)
-  poolController?.update(deltaTime)
+  if (poolMode && poolController) {
+    const poolEvent = poolController.update(deltaTime, { onFloat: poolOnFloat })
+    if (poolEvent.dischargeStarted) {
+      host.classList.add('is-electrified')
+      if (poolEvent.state.outcome === 'dead') triggerPoolDeath()
+      else status.textContent = '池水正在漏电，浮板使你与水面绝缘'
+    }
+    if (poolEvent.dischargeEnded) {
+      host.classList.remove('is-electrified')
+      status.textContent = poolEvent.state.ladderExtension >= .995
+        ? '漏电结束，梯子已经伸到镜面天花板'
+        : '漏电结束，现在可以安全回到水中'
+    }
+  }
   glassProp?.update(deltaTime)
   if (!touchMode) updateInteractionPrompt()
   renderer.render(scene, camera)
@@ -1160,8 +1340,11 @@ window.barTour = {
     horrorMode,
     poolMode,
     poolPuzzle: poolController?.getPuzzleState() ?? null,
+    poolElectrical: poolController?.getElectricalState() ?? null,
     poolLadderReady: poolController?.isLadderReady() ?? false,
+    poolFullLadderReady: poolController?.isFullLadderReady() ?? false,
     poolClimbHeight,
+    poolOnFloat,
     portalState,
     gameState,
     tvChannel: tvProp?.getChannelIndex() ?? null,

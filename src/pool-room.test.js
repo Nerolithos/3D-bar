@@ -7,6 +7,7 @@ import {
   POOL_COLUMN_RADIUS,
   createPoolCausticsMaterial,
   createPoolWaterMaterial,
+  isPoolInteractionOccluder,
   preparePoolRoom,
   resolveShortestAngle,
   resolvePoolMove,
@@ -34,6 +35,10 @@ test('pool water uses time-driven regular wave shading and updates without rebui
   assert.match(material.vertexShader, /p\.xz \+=/)
   assert.match(material.vertexShader, /vWorldNormal/)
   assert.match(material.fragmentShader, /fresnel/)
+  assert.match(material.fragmentShader, /lightningArc/)
+  assert.match(material.fragmentShader, /electricFbm/)
+  assert.match(material.fragmentShader, /branchPath/)
+  assert.doesNotMatch(material.fragmentShader, /electricPulse/)
   const root = new THREE.Group()
   const surface = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial())
   surface.name = 'PoolWaterSurface'
@@ -44,6 +49,22 @@ test('pool water uses time-driven regular wave shading and updates without rebui
   controller.update(.2)
   assert.strictEqual(surface.material, assigned)
   assert.ok(Math.abs(assigned.uniforms.time.value - .3) < 1e-9)
+})
+
+test('water and television meshes never block pool interaction rays', () => {
+  const waterByName = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial())
+  waterByName.name = 'PoolWaterVolume'
+  const waterByMaterial = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial())
+  waterByMaterial.material.name = 'Animated pool water'
+  const television = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial())
+  television.userData.ignoreInteractionOcclusion = true
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial())
+  wall.name = 'PoolWallBack'
+
+  assert.equal(isPoolInteractionOccluder(waterByName), false)
+  assert.equal(isPoolInteractionOccluder(waterByMaterial), false)
+  assert.equal(isPoolInteractionOccluder(television), false)
+  assert.equal(isPoolInteractionOccluder(wall), true)
 })
 
 test('pool light beams use soft radial haze sprites instead of exported solid shaft meshes', () => {
@@ -96,4 +117,29 @@ test('three-duck alignment reveals a shared-geometry half-height ladder', () => 
   assert.equal(base.x, top.x)
   assert.equal(base.z, top.z)
   assert.ok(top.y > base.y)
+})
+
+test('reused pool television is full-size and leans from the floor onto the rear deck', () => {
+  const room = new THREE.Group()
+  const source = new THREE.Group()
+  source.name = 'TVRoot'
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(.5, .7), new THREE.MeshBasicMaterial())
+  screen.name = 'TVScreen'
+  const dial = new THREE.Object3D()
+  dial.name = 'tvDial'
+  source.add(screen, dial)
+
+  const controller = preparePoolRoom(room, source)
+  const television = controller.electricalTelevision.root
+  room.updateMatrixWorld(true)
+  const supportedTop = television.localToWorld(new THREE.Vector3(0, .741, 0))
+
+  assert.equal(television.scale.x, 2.2)
+  assert.ok(television.position.y <= -1.1)
+  assert.ok(supportedTop.y > .2 && supportedTop.y < .5)
+  assert.ok(supportedTop.z > 6.4)
+  assert.equal(television.getObjectByName('TVScreen').userData.ignoreInteractionOcclusion, true)
+  assert.equal(controller.electricalTelevision.interactionAnchor.parent, room)
+  assert.ok(controller.electricalTelevision.interactionSize.x > 1)
+  assert.ok(controller.electricalTelevision.interactionSize.y > 1)
 })
