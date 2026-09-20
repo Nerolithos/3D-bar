@@ -7,6 +7,17 @@ export const PORTALS = Object.freeze([
     previewUrl: '/textures/pool-portal-dagon-deac052c.jpg',
     oneWay: false,
   }),
+  Object.freeze({
+    id: 'library-02',
+    screenName: 'CRTScreen_07',
+    label: 'Yog-Sothoth 图书馆',
+    modelUrl: '/models/elevator-b6e14779.glb',
+    bookshelfUrl: '/models/bookshelf-1651bc85.glb',
+    ceilingUrl: '/models/ceiling-ab0e0502.glb',
+    eyeUrl: '/textures/library-eye-4e4953f6.webp',
+    previewUrl: '/textures/portal-yog-sothoth-78d62693.jpg',
+    oneWay: false,
+  }),
 ])
 
 const VALID_STATUSES = new Set([

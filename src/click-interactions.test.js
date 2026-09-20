@@ -73,6 +73,20 @@ test('targets beyond interaction distance are rejected', () => {
   assert.equal(selectClickTarget([{ distance: 1.56, candidate: target }], emptyState, 1.55), null)
 })
 
+test('a large wall control can opt into a slightly longer interaction distance', () => {
+  const panel = { type: 'elevator-open', maxDistance: 2.35 }
+  assert.equal(selectClickTarget([{ distance: 2.2, candidates: [panel] }], emptyState, 1.75), panel)
+  assert.equal(selectClickTarget([{ distance: 2.4, candidates: [panel] }], emptyState, 1.75), null)
+})
+
+test('a visible dedicated control face can bypass decorative imported trim', () => {
+  const panel = { type: 'elevator-open', maxDistance: 2.35, ignoreOcclusion: true }
+  assert.equal(selectClickTarget([
+    { distance: .9, blocksInteraction: true },
+    { distance: 1.05, candidates: [panel] },
+  ], emptyState, 1.75), panel)
+})
+
 test('held items permit only their matching actions', () => {
   const glassHeld = {
     ...emptyState,

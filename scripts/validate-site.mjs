@@ -14,6 +14,8 @@ const lifecycleSource = await readFile(path.join(root, 'src/scene-lifecycle.js')
 const horrorSource = await readFile(path.join(root, 'src/horror-room.js'), 'utf8')
 const poolSource = await readFile(path.join(root, 'src/pool-room.js'), 'utf8')
 const poolElectricalSource = await readFile(path.join(root, 'src/pool-electrical.js'), 'utf8')
+const elevatorLibrarySource = await readFile(path.join(root, 'src/elevator-library.js'), 'utf8')
+const libraryPuzzleSource = await readFile(path.join(root, 'src/library-puzzle.js'), 'utf8')
 const portalSource = await readFile(path.join(root, 'src/portal-state.js'), 'utf8')
 const routeSource = await readFile(path.join(root, 'src/app-route.js'), 'utf8')
 const html = await readFile(path.join(root, 'index.html'), 'utf8')
@@ -24,6 +26,11 @@ const packagedModelName = 'cozy_bar_v008-e4ad253c.glb'
 const horrorModelName = 'horror_room_v001-62e06a81.glb'
 const poolModelName = 'pool_room_v001-2ee22a73.glb'
 const poolPreviewName = 'pool-portal-dagon-deac052c.jpg'
+const elevatorModelName = 'elevator-b6e14779.glb'
+const bookshelfModelName = 'bookshelf-1651bc85.glb'
+const ceilingModelName = 'ceiling-ab0e0502.glb'
+const libraryEyeName = 'library-eye-4e4953f6.webp'
+const libraryPreviewName = 'portal-yog-sothoth-78d62693.jpg'
 const handprintName = 'tv-handprint-b6082550.jpg'
 const interactiveModelNames = [
   'ice_cubes-2b87f6f4.glb',
@@ -94,16 +101,19 @@ const required = [
   'if (!directHorror) roomLoader.load',
   'updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)',
   "type: 'portal-screen'",
-  'startPoolPortalPreload()',
-  'enterPoolPortal(target.portalId)',
+  'startPortalPreload(target.portalId)',
+  'enterTelevisionPortal(target.portalId)',
   'portalLifecycle.transition',
   'poolController.update(deltaTime, { onFloat: poolOnFloat })',
   "type: 'pool-tv-power'",
   "type: 'pool-float'",
-  "type: 'future-portal-screen'",
+  "type: 'elevator-open'",
+  "type: 'library-light-switch'",
+  "type: 'library-book'",
+  "type: 'library-reward-book'",
   'triggerPoolDeath()',
   'returnFromPool({ escaped: true })',
-  'preserveCurrent: true',
+  'preserveCurrent: !config.oneWay',
   'Second portal environmental glow',
   'secondPortalScreenTarget',
   '0xcfe8e5',
@@ -116,6 +126,9 @@ for (const token of required) {
 }
 if (!routeSource.includes("pathname === '/hr2'") || !source.includes('getInitialScene(location.pathname)')) {
   throw new Error('Missing /hr2 direct horror-room route')
+}
+if (!routeSource.includes("pathname === '/hr3'") || !source.includes("initialScene === 'horror-after-pool'")) {
+  throw new Error('Missing /hr3 completed-pool horror-room route')
 }
 for (const token of [
   'inventory',
@@ -184,6 +197,30 @@ if (poolPreviewName !== `pool-portal-dagon-${digest(poolPreview).slice(0, 8)}.jp
 }
 for (const token of [poolModelName, poolPreviewName, "id: 'pool-01'", "screenName: 'CRTScreen_06'"]) {
   if (!portalSource.includes(token)) throw new Error(`Missing pool portal configuration: ${token}`)
+}
+for (const [name, limit] of [[elevatorModelName, 500_000], [bookshelfModelName, 100_000], [ceilingModelName, 30_000]]) {
+  const bytes = await readFile(path.join(modelDir, name))
+  if (bytes.byteLength >= limit) throw new Error(`${name} exceeds optimized size limit`)
+  if (!name.includes(digest(bytes).slice(0, 8))) throw new Error(`${name} content hash mismatch`)
+}
+const libraryPreview = await readFile(path.join(root, 'public/textures', libraryPreviewName))
+if (libraryPreview.byteLength >= 100_000) throw new Error('Library portal preview exceeds 100 KB')
+if (!libraryPreviewName.includes(digest(libraryPreview).slice(0, 8))) {
+  throw new Error('Library portal preview content hash mismatch')
+}
+const libraryEye = await readFile(path.join(root, 'public/textures', libraryEyeName))
+if (libraryEye.byteLength >= 20_000) throw new Error('Library eye texture exceeds 20 KB')
+if (!libraryEyeName.includes(digest(libraryEye).slice(0, 8))) throw new Error('Library eye texture content hash mismatch')
+for (const token of [elevatorModelName, bookshelfModelName, ceilingModelName, libraryEyeName, libraryPreviewName, "id: 'library-02'", "screenName: 'CRTScreen_07'"]) {
+  if (!portalSource.includes(token) && !elevatorLibrarySource.includes(token)) {
+    throw new Error(`Missing library portal configuration: ${token}`)
+  }
+}
+for (const token of ['prepareElevatorLibrary', 'Unstable elevator ceiling light', 'Native elevator control panel on right wall', 'straightenHorizontal', 'Library bookshelf unit', 'Book resting on table', 'Library ceiling light rows', 'Library wall light switch', 'Pullable library book', 'Aged wax-yellow wallpaper', 'Restored dark library floor', 'Library front wall left of elevator', 'Library watching eye', 'Library reward door book', 'toggleDoors()']) {
+  if (!elevatorLibrarySource.includes(token)) throw new Error(`Missing elevator library feature: ${token}`)
+}
+for (const token of ["['left', 'right', 'center', 'right', 'left', 'center']", "'success-flash'", "'blackout'", "'blackout-deadline'", 'LIBRARY_BLACKOUT_ROW_SECONDS', 'LIBRARY_SURVIVAL_RESTORE_SECONDS', 'resolveLibraryEscape', 'rewardVisible', 'rewardOpened']) {
+  if (!libraryPuzzleSource.includes(token)) throw new Error(`Missing library puzzle feature: ${token}`)
 }
 for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'lightningArc', 'electricFbm', 'branchPath', 'resolvePoolMove', 'resolveShortestAngle', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Clear pool ceiling mirror', 'textureWidth: 384', 'Pool puzzle half-height ladder', 'POOL_DUCKS', 'rotateDuck(duckId)', 'isLadderReady', 'televisionBank', 'ignoreInteractionOcclusion', 'Whole pool television interaction anchor', "'#ff0000'"]) {
   if (!poolSource.includes(token)) throw new Error(`Missing pool room runtime feature: ${token}`)

@@ -102,6 +102,72 @@ body {
   animation: pool-blackout 1.65s ease forwards;
 }
 
+.bar-scene__library-threat {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at center, transparent 22%, rgb(105 0 0 / calc(var(--library-danger, 0) * .34)) 62%, rgb(185 0 0 / calc(var(--library-danger, 0) * .9)) 100%);
+  opacity: var(--library-danger, 0);
+  pointer-events: none;
+  transition: opacity 180ms linear;
+}
+
+.bar-scene__library-threat::before {
+  position: absolute;
+  inset: -8%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 600'%3E%3Cdefs%3E%3ClinearGradient id='a'%3E%3Cstop stop-color='%23a90000' stop-opacity='.08'/%3E%3Cstop offset='.24' stop-color='%23d00000' stop-opacity='.75'/%3E%3Cstop offset='.78' stop-color='%23a90000' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23740000' stop-opacity='.03'/%3E%3C/linearGradient%3E%3ClinearGradient id='b' x2='0' y2='1'%3E%3Cstop stop-color='%23940000' stop-opacity='.04'/%3E%3Cstop offset='.46' stop-color='%23e00000' stop-opacity='.62'/%3E%3Cstop offset='1' stop-color='%23700000' stop-opacity='.02'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cg stroke='url(%23a)'%3E%3Cpath stroke-width='6' d='M-35 170 C95 194 104 315 244 292 S364 88 500 126 S666 344 815 282 S932 82 1045 105'/%3E%3Cpath stroke-width='3.5' d='M-18 74 C93 38 165 127 240 67 S371 7 438 78 S570 119 632 50'/%3E%3Cpath stroke-width='5' d='M1038 510 C884 538 842 414 729 438 S586 603 448 576 S306 416 181 448 S45 548 -38 520'/%3E%3Cpath stroke-width='2.5' d='M8 356 C108 318 180 379 271 344 S420 236 503 295 S626 452 720 410 S850 292 1016 326'/%3E%3Cpath stroke-width='4' d='M-25 548 C105 505 193 583 313 528 S506 431 618 491 S807 590 1024 548'/%3E%3C/g%3E%3Cg stroke='url(%23b)'%3E%3Cpath stroke-width='4.5' d='M122 625 C138 486 288 471 282 350 S220 168 334 -28'/%3E%3Cpath stroke-width='3' d='M740 -30 C716 91 608 155 635 263 S793 374 744 520'/%3E%3Cpath stroke-width='5.5' d='M916 -25 C872 93 930 177 842 267 S768 446 838 628'/%3E%3Cpath stroke-width='2' d='M46 -22 C94 87 39 172 104 249 S196 372 142 462 S101 555 126 622'/%3E%3Cpath stroke-width='3.2' d='M492 -25 C454 75 527 150 471 233 S390 360 454 443 S524 535 487 625'/%3E%3C/g%3E%3Cg stroke='%23c00000'%3E%3Cpath stroke-width='2.2' opacity='.38' d='M245 292 C210 250 168 238 126 244 M244 292 C283 330 310 371 302 414 M500 126 C468 92 456 55 472 18 M815 282 C850 321 885 342 927 337'/%3E%3Cpath stroke-width='1.3' opacity='.56' d='M271 344 C235 382 211 409 217 455 M503 295 C540 260 565 226 560 183 M618 491 C652 455 676 429 674 390'/%3E%3Cpath stroke-width='.7' opacity='.25' d='M126 244 C102 222 78 215 55 220 M302 414 C321 442 326 470 316 496 M472 18 C478 1 488 -11 503 -24 M927 337 C955 341 981 331 1007 310'/%3E%3Cpath stroke-width='1.8' opacity='.7' d='M104 249 C139 224 155 196 150 161 M471 233 C434 210 412 181 414 145 M842 267 C806 242 789 209 799 172'/%3E%3Cpath stroke-width='.6' opacity='.32' d='M150 161 C145 142 134 128 116 119 M414 145 C420 123 435 108 455 101 M799 172 C814 151 833 142 856 145'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  background-position: center;
+  background-size: cover;
+  content: '';
+  filter: blur(1px);
+  mix-blend-mode: screen;
+  opacity: calc(var(--library-danger, 0) * .68);
+  transform: rotate(-2deg) scale(1.08);
+}
+
+.bar-scene__library-threat img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: none;
+  width: min(125vw, 110rem);
+  max-width: none;
+  filter: contrast(1.35) drop-shadow(0 0 4rem #b40000);
+  transform: translate(-50%, -50%);
+}
+
+.bar-scene.is-library-danger canvas {
+  filter: blur(calc(var(--library-danger, 0) * 3px)) saturate(calc(1 + var(--library-danger, 0) * .45));
+}
+
+.bar-scene.is-library-jumpscare .bar-scene__library-threat {
+  background: #000;
+  opacity: 1;
+  transition: none;
+  animation: library-death-blackout 1.65s ease-in both;
+}
+
+.bar-scene.is-library-jumpscare .bar-scene__library-threat::before { display: none; }
+
+.bar-scene.is-library-jumpscare .bar-scene__library-threat img {
+  display: block;
+  animation: library-eye-jumpscare 1.05s cubic-bezier(.1, .82, .18, 1) both;
+}
+
+@keyframes library-eye-jumpscare {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.14) rotate(-4deg); }
+  17% { opacity: 1; transform: translate(-50%, -50%) scale(.52) rotate(2deg); }
+  46% { transform: translate(-50%, -50%) scale(1.18) rotate(-1deg); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(2.7) rotate(1deg); }
+}
+
+@keyframes library-death-blackout {
+  0%, 62% { background-color: #180000; }
+  100% { background-color: #000; }
+}
+
 @keyframes pool-electric-shock {
   0%, 100% { filter: brightness(1) contrast(1); }
   50% { filter: brightness(1.55) contrast(1.3) saturate(.7); }

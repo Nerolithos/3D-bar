@@ -42,17 +42,30 @@ export function isCandidateEligible(candidate, state) {
 
 export function selectClickTarget(hits, state, maxDistance) {
   const sortedHits = [...hits].sort((left, right) => left.distance - right.distance)
+  // Some controls sit inside complex imported trim. Their dedicated proxy is
+  // already constrained to the visible face, so decorative mesh hits must not
+  // steal the click before that proxy is reached.
   for (const hit of sortedHits) {
-    if (hit.distance > maxDistance) return null
+    const candidates = hit.candidates ?? (hit.candidate ? [hit.candidate] : [])
+    const candidate = candidates.find((item) => item.ignoreOcclusion &&
+      hit.distance <= (item.maxDistance ?? maxDistance) && isCandidateEligible(item, state))
+    if (candidate) return candidate
+  }
+  for (const hit of sortedHits) {
     if (hit.candidates) {
-      const candidate = hit.candidates.find((item) => isCandidateEligible(item, state))
+      const candidate = hit.candidates.find((item) =>
+        hit.distance <= (item.maxDistance ?? maxDistance) && isCandidateEligible(item, state))
       if (candidate) return candidate
+      if (hit.distance > maxDistance) return null
       continue
     }
     if (hit.candidate) {
-      if (isCandidateEligible(hit.candidate, state)) return hit.candidate
+      if (hit.distance <= (hit.candidate.maxDistance ?? maxDistance) &&
+          isCandidateEligible(hit.candidate, state)) return hit.candidate
+      if (hit.distance > maxDistance) return null
       continue
     }
+    if (hit.distance > maxDistance) return null
     if (hit.blocksInteraction) return null
   }
   return null

@@ -19,6 +19,13 @@ test('pool television uses a stable portal id and begins locked', () => {
   assert.equal(createPortalState()['pool-01'].status, 'locked')
 })
 
+test('second television has its own locked Yog-Sothoth portal', () => {
+  assert.equal(PORTALS[1].id, 'library-02')
+  assert.equal(PORTALS[1].screenName, 'CRTScreen_07')
+  assert.match(PORTALS[1].previewUrl, /portal-yog-sothoth-[a-f0-9]{8}\.jpg$/)
+  assert.equal(createPortalState()['library-02'].status, 'locked')
+})
+
 test('pool portal follows locked, preload, ready, entering and completed states', () => {
   const locked = createPortalState()
   const unlocked = unlockPortal(locked, 'pool-01')
