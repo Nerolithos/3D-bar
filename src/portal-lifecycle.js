@@ -31,7 +31,11 @@ export function createPortalLifecycle({ scene, loadPortal }) {
     getRoot(portalId) {
       return roots.get(portalId) ?? null
     },
-    transition(portalId, { clearCollections = [], preserveCurrent = false } = {}) {
+    transition(portalId, {
+      clearCollections = [],
+      preserveCurrent = false,
+      releasePreservedGpu = false,
+    } = {}) {
       const nextRoot = roots.get(portalId)
       if (transitioned || !nextRoot) return false
       transitioned = true
@@ -43,8 +47,10 @@ export function createPortalLifecycle({ scene, loadPortal }) {
       currentRoots.forEach((root) => {
         scene.remove(root)
         root.removeFromParent?.()
-        if (preserveCurrent) root.visible = false
-        else disposeObjectTree(root, disposedResources)
+        if (preserveCurrent) {
+          root.visible = false
+          if (releasePreservedGpu) disposeObjectTree(root, disposedResources)
+        } else disposeObjectTree(root, disposedResources)
       })
       preservedRoots = preserveCurrent ? [...currentRoots] : []
       currentRoots = []

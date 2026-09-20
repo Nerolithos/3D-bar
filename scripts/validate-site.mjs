@@ -216,7 +216,7 @@ for (const token of [elevatorModelName, bookshelfModelName, ceilingModelName, li
     throw new Error(`Missing library portal configuration: ${token}`)
   }
 }
-for (const token of ['prepareElevatorLibrary', 'Unstable elevator ceiling light', 'Native elevator control panel on right wall', 'straightenHorizontal', 'Library bookshelf unit', 'Book resting on table', 'Library ceiling light rows', 'Library wall light switch', 'Pullable library book', 'Aged wax-yellow wallpaper', 'Restored dark library floor', 'Library front wall left of elevator', 'Library watching eye', 'Library reward door book', 'toggleDoors()']) {
+for (const token of ['prepareElevatorLibrary', 'Unstable elevator ceiling light', 'Native elevator control panel on right wall', 'straightenHorizontal', 'Library bookshelf unit', 'Instanced library bookshelf units', 'sharedBoxGeometry', 'Book resting on table', 'Library ceiling light rows', 'Library wall light switch', 'Pullable library book', 'Aged wax-yellow wallpaper', 'Restored dark library floor', 'Library front wall left of elevator', 'Library watching eye', 'Library reward door book', 'toggleDoors()']) {
   if (!elevatorLibrarySource.includes(token)) throw new Error(`Missing elevator library feature: ${token}`)
 }
 for (const token of ["['left', 'right', 'center', 'right', 'left', 'center']", "'success-flash'", "'blackout'", "'blackout-deadline'", 'LIBRARY_BLACKOUT_ROW_SECONDS', 'LIBRARY_SURVIVAL_RESTORE_SECONDS', 'resolveLibraryEscape', 'rewardVisible', 'rewardOpened']) {

@@ -71,15 +71,28 @@ test('elevator library reuses optimized assets and fills every wall with bookshe
   assert.equal(importedHandles.filter(({ visible }) => visible).length, 2)
   controller.openButton.traverse((object) => assert.equal(object.userData.ignoreInteractionOcclusion, true))
   const shelves = controller.root.children.filter(({ name }) => name === 'Library bookshelf unit')
+  const instancedShelves = controller.root.getObjectByName('Instanced library bookshelf units')
   const tableBooks = []
   controller.root.traverse((object) => { if (object.name === 'Book resting on table') tableBooks.push(object) })
-  assert.ok(shelves.length >= 15)
+  assert.equal(shelves.length, 3)
+  assert.equal(instancedShelves.userData.instanceCount, 12)
+  instancedShelves.traverse((object) => {
+    if (object.isInstancedMesh) assert.equal(object.count, 12)
+  })
   controller.root.updateMatrixWorld(true)
   const backShelfSize = new THREE.Box3().setFromObject(shelves[0]).getSize(new THREE.Vector3())
-  const sideShelfSize = new THREE.Box3().setFromObject(shelves[5]).getSize(new THREE.Vector3())
+  const sideShelfSize = new THREE.Box3().setFromObject(shelves[1]).getSize(new THREE.Vector3())
   assert.ok(backShelfSize.x > backShelfSize.z * 4)
   assert.ok(sideShelfSize.z > sideShelfSize.x * 4)
   assert.ok(tableBooks.length >= 6)
+  const generatedBoxMeshes = []
+  const generatedBoxGeometries = new Set()
+  controller.root.traverse((object) => {
+    if (!object.isMesh || !object.geometry?.name?.startsWith('Shared box ')) return
+    generatedBoxMeshes.push(object)
+    generatedBoxGeometries.add(object.geometry)
+  })
+  assert.ok(generatedBoxMeshes.length > generatedBoxGeometries.size * 1.5)
   assert.ok(controller.root.getObjectByName('Library ceiling light rows'))
   assert.ok(controller.root.getObjectByName('Library front wall left of elevator'))
   assert.ok(controller.root.getObjectByName('Library front wall right of elevator'))

@@ -16,6 +16,18 @@ export const EYE_TEXTURE_URL = '/textures/library-eye-4e4953f6.webp'
 
 const ELEVATOR_BOUNDS = Object.freeze({ minX: -1.08, maxX: 1.08, minZ: 3.25, maxZ: 5.55 })
 const LIBRARY_BOUNDS = Object.freeze({ minX: -6.25, maxX: 6.25, minZ: -14.2, maxZ: 5.75 })
+const sharedBoxGeometries = new Map()
+
+function sharedBoxGeometry(size) {
+  const key = size.join(':')
+  let geometry = sharedBoxGeometries.get(key)
+  if (!geometry) {
+    geometry = new THREE.BoxGeometry(...size)
+    geometry.name = `Shared box ${key}`
+    sharedBoxGeometries.set(key, geometry)
+  }
+  return geometry
+}
 
 export function resolveElevatorLibraryMove(position, doorsOpen, previousPosition = null) {
   const bounds = doorsOpen ? LIBRARY_BOUNDS : ELEVATOR_BOUNDS
@@ -79,7 +91,7 @@ function createWallpaperMaterial() {
 }
 
 function box(parent, name, size, position, boxMaterial) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), boxMaterial)
+  const mesh = new THREE.Mesh(sharedBoxGeometry(size), boxMaterial)
   mesh.name = name
   mesh.position.fromArray(position)
   mesh.castShadow = true
@@ -117,6 +129,41 @@ function normalizedClone(source, targetHeight, name, { straightenHorizontal = fa
 
 function createShelfUnit(source) {
   return normalizedClone(source, 2.65, 'Library bookshelf unit', { straightenHorizontal: true })
+}
+
+function createInstancedShelfUnits(template, placements) {
+  const group = new THREE.Group()
+  group.name = 'Instanced library bookshelf units'
+  group.userData.instanceCount = placements.length
+  template.updateMatrixWorld(true)
+  const templateInverse = template.matrixWorld.clone().invert()
+  const relative = new THREE.Matrix4()
+  const placementMatrix = new THREE.Matrix4()
+  const combined = new THREE.Matrix4()
+  const quaternion = new THREE.Quaternion()
+  const position = new THREE.Vector3()
+  const scale = new THREE.Vector3(1, 1, 1)
+  template.traverse((sourceMesh) => {
+    if (!sourceMesh.isMesh || !sourceMesh.visible) return
+    relative.multiplyMatrices(templateInverse, sourceMesh.matrixWorld)
+    const instanced = new THREE.InstancedMesh(sourceMesh.geometry, sourceMesh.material, placements.length)
+    instanced.name = `Instanced shelf ${sourceMesh.name}`
+    instanced.castShadow = sourceMesh.castShadow
+    instanced.receiveShadow = sourceMesh.receiveShadow
+    for (const [index, placement] of placements.entries()) {
+      position.set(placement.x, 1.34, placement.z)
+      quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY)
+      placementMatrix.compose(position, quaternion, scale)
+      combined.multiplyMatrices(placementMatrix, relative)
+      instanced.setMatrixAt(index, combined)
+    }
+    instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage)
+    instanced.instanceMatrix.needsUpdate = true
+    instanced.computeBoundingBox()
+    instanced.computeBoundingSphere()
+    group.add(instanced)
+  })
+  return group
 }
 
 function createPullableBook(bookId, coverMaterial, pageMaterial, detailMaterial) {
@@ -358,7 +405,12 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
 
   const shelfTemplate = createShelfUnit(bookshelfSource)
   const pullableBooks = []
+  const staticShelfPlacements = []
   const addShelf = (x, z, rotationY, pullable = null) => {
+    if (!pullable) {
+      staticShelfPlacements.push({ x, z, rotationY })
+      return
+    }
     const shelf = shelfTemplate.clone(true)
     shelf.position.set(x, 1.34, z)
     shelf.rotation.y = rotationY
@@ -418,6 +470,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     addShelf(-6.3, z, Math.PI / 2, leftPullable)
     addShelf(6.3, z, -Math.PI / 2, rightPullable)
   }
+  root.add(createInstancedShelfUnits(shelfTemplate, staticShelfPlacements))
   for (const [index, z] of [-10.7, -7.3, -3.9].entries()) {
     const table = createTableSet(wood, darkWood, bookMaterials, index)
     table.position.z = z
@@ -441,7 +494,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
   }
   const watchingEyes = {}
   for (const [side, position] of Object.entries(eyePositions)) {
-    const eye = new THREE.Sprite(eyeMaterial.clone())
+    const eye = new THREE.Sprite(eyeMaterial)
     eye.name = `Library watching eye ${side}`
     eye.position.copy(position)
     eye.scale.set(.52, .34, 1)
@@ -470,7 +523,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
       const fixture = fixtureTemplate.clone(true)
       fixture.position.set(x, 3.52, z)
       ceilingFixtures.add(fixture)
-      const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.48, .025, .18), rowGlow)
+      const diffuser = new THREE.Mesh(sharedBoxGeometry([1.48, .025, .18]), rowGlow)
       diffuser.name = `Library ceiling light diffuser row ${rowIndex + 1}`
       diffuser.position.set(x, 3.48, z)
       row.diffusers.push(diffuser)
@@ -523,6 +576,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
   let libraryLightsOn = true
   let puzzleState = createLibraryPuzzleState()
   let elapsed = 0
+  const bookMotionTarget = new THREE.Vector3()
   const leftClosedX = leftDoor.position.x
   const rightClosedX = rightDoor.position.x
   const applyPuzzleVisuals = () => {
@@ -675,7 +729,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
         ? 19
         : puzzleState.lightsOn ? (14 + irregular * 5.2) * dropout : 0
       for (const book of pullableBooks) {
-        const target = book.userData.restPosition.clone().addScaledVector(
+        const target = bookMotionTarget.copy(book.userData.restPosition).addScaledVector(
           book.userData.pullDirection,
           book.userData.pulled ? .13 : 0,
         )

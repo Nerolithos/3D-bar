@@ -66,3 +66,31 @@ test('reversible portal preserves the horror room and reuses the preloaded pool'
   assert.equal(lifecycle.transition('pool-01', { preserveCurrent: true }), true)
   assert.deepEqual(added, [pool, horror, pool])
 })
+
+test('a reversible portal can release hidden GPU resources without discarding the preserved root', async () => {
+  let geometryDisposals = 0
+  let materialDisposals = 0
+  const mesh = {
+    geometry: { dispose: () => { geometryDisposals += 1 } },
+    material: { dispose: () => { materialDisposals += 1 } },
+  }
+  const horror = {
+    ...root('horror'),
+    traverse(callback) { callback(mesh) },
+  }
+  const library = root('library')
+  const lifecycle = createPortalLifecycle({
+    scene: { add() {}, remove() {} },
+    loadPortal: async () => library,
+  })
+  lifecycle.setCurrentRoots([horror])
+  await lifecycle.preload('library-02')
+  assert.equal(lifecycle.transition('library-02', {
+    preserveCurrent: true,
+    releasePreservedGpu: true,
+  }), true)
+  assert.equal(geometryDisposals, 1)
+  assert.equal(materialDisposals, 1)
+  assert.equal(lifecycle.returnToPrevious(), true)
+  assert.equal(horror.visible, true)
+})

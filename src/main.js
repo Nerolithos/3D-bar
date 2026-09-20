@@ -1033,6 +1033,7 @@ function enterTelevisionPortal(portalId) {
     if (!portalLifecycle.transition(portalId, {
       clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
       preserveCurrent: !config.oneWay,
+      releasePreservedGpu: portalId === PORTALS[1].id,
     })) {
       return false
     }
