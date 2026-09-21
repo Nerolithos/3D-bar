@@ -13,6 +13,11 @@ test('the /hr3 shortcut starts in the horror room with the pool completed', () =
   assert.equal(getInitialScene('/hr3/'), 'horror-after-pool')
 })
 
+test('the /yog shortcut starts inside the survived library elevator', () => {
+  assert.equal(getInitialScene('/yog'), 'library-after-survival')
+  assert.equal(getInitialScene('/yog/'), 'library-after-survival')
+})
+
 test('all other paths start in the bar', () => {
   assert.equal(getInitialScene('/'), 'bar')
   assert.equal(getInitialScene('/anything-else'), 'bar')

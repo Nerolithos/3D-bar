@@ -29,6 +29,9 @@ const poolPreviewName = 'pool-portal-dagon-deac052c.jpg'
 const elevatorModelName = 'elevator-b6e14779.glb'
 const bookshelfModelName = 'bookshelf-1651bc85.glb'
 const ceilingModelName = 'ceiling-ab0e0502.glb'
+const woodDoorModelName = 'wood_door-68fb2c4e.glb'
+const eyeModelName = 'eye-7bc5b3e3.glb'
+const keyModelName = 'key-b07613f7.glb'
 const libraryEyeName = 'library-eye-4e4953f6.webp'
 const libraryPreviewName = 'portal-yog-sothoth-78d62693.jpg'
 const handprintName = 'tv-handprint-b6082550.jpg'
@@ -57,6 +60,7 @@ const required = [
   'counterBounds',
   "from './game-state.js'",
   'const EYE_HEIGHT = 1.75',
+  'scene.add(camera)',
   "'SeatInteract_1'",
   "'SeatInteract_4'",
   "'SafeDoor'",
@@ -98,7 +102,7 @@ const required = [
   'updateHorrorStatic',
   'addHorrorScreenLights(root)',
   'sceneLifecycle.activate',
-  'if (!directHorror) roomLoader.load',
+  'if (!directNonBar) roomLoader.load',
   'updateHorrorEntranceDoor(horrorDoorPivot, deltaTime)',
   "type: 'portal-screen'",
   'startPortalPreload(target.portalId)',
@@ -111,6 +115,8 @@ const required = [
   "type: 'library-light-switch'",
   "type: 'library-book'",
   "type: 'library-reward-book'",
+  "type: 'library-key'",
+  "type: 'library-key-slot'",
   'triggerPoolDeath()',
   'returnFromPool({ escaped: true })',
   'preserveCurrent: !config.oneWay',
@@ -129,6 +135,9 @@ if (!routeSource.includes("pathname === '/hr2'") || !source.includes('getInitial
 }
 if (!routeSource.includes("pathname === '/hr3'") || !source.includes("initialScene === 'horror-after-pool'")) {
   throw new Error('Missing /hr3 completed-pool horror-room route')
+}
+if (!routeSource.includes("pathname === '/yog'") || !source.includes("initialScene === 'library-after-survival'")) {
+  throw new Error('Missing /yog survived-library elevator route')
 }
 for (const token of [
   'inventory',
@@ -203,6 +212,11 @@ for (const [name, limit] of [[elevatorModelName, 500_000], [bookshelfModelName, 
   if (bytes.byteLength >= limit) throw new Error(`${name} exceeds optimized size limit`)
   if (!name.includes(digest(bytes).slice(0, 8))) throw new Error(`${name} content hash mismatch`)
 }
+for (const [name, limit] of [[woodDoorModelName, 10_000], [eyeModelName, 40_000], [keyModelName, 5_000]]) {
+  const bytes = await readFile(path.join(modelDir, name))
+  if (bytes.byteLength >= limit) throw new Error(`${name} exceeds optimized size limit`)
+  if (!name.includes(digest(bytes).slice(0, 8))) throw new Error(`${name} content hash mismatch`)
+}
 const libraryPreview = await readFile(path.join(root, 'public/textures', libraryPreviewName))
 if (libraryPreview.byteLength >= 100_000) throw new Error('Library portal preview exceeds 100 KB')
 if (!libraryPreviewName.includes(digest(libraryPreview).slice(0, 8))) {
@@ -211,15 +225,15 @@ if (!libraryPreviewName.includes(digest(libraryPreview).slice(0, 8))) {
 const libraryEye = await readFile(path.join(root, 'public/textures', libraryEyeName))
 if (libraryEye.byteLength >= 20_000) throw new Error('Library eye texture exceeds 20 KB')
 if (!libraryEyeName.includes(digest(libraryEye).slice(0, 8))) throw new Error('Library eye texture content hash mismatch')
-for (const token of [elevatorModelName, bookshelfModelName, ceilingModelName, libraryEyeName, libraryPreviewName, "id: 'library-02'", "screenName: 'CRTScreen_07'"]) {
+for (const token of [elevatorModelName, bookshelfModelName, ceilingModelName, woodDoorModelName, eyeModelName, keyModelName, libraryEyeName, libraryPreviewName, "id: 'library-02'", "screenName: 'CRTScreen_07'"]) {
   if (!portalSource.includes(token) && !elevatorLibrarySource.includes(token)) {
     throw new Error(`Missing library portal configuration: ${token}`)
   }
 }
-for (const token of ['prepareElevatorLibrary', 'Unstable elevator ceiling light', 'Native elevator control panel on right wall', 'straightenHorizontal', 'Library bookshelf unit', 'Instanced library bookshelf units', 'sharedBoxGeometry', 'Book resting on table', 'Library ceiling light rows', 'Library wall light switch', 'Pullable library book', 'Aged wax-yellow wallpaper', 'Restored dark library floor', 'Library front wall left of elevator', 'Library watching eye', 'Library reward door book', 'toggleDoors()']) {
+for (const token of ['prepareElevatorLibrary', 'Unstable elevator ceiling light', 'Native elevator control panel on right wall', 'straightenHorizontal', 'Library bookshelf unit', 'Instanced library bookshelf units', 'sharedBoxGeometry', 'Book resting on table', 'Library ceiling light rows', 'Library wall light switch', 'Pullable library book', 'Aged wax-yellow wallpaper', 'Restored dark library floor', 'Library front wall left of elevator', 'Library watching eye', 'Library fantasy door book', 'Compressed wood door cover', 'Instanced eye.glb spreading infection', 'Compressed eye.glb shared infection material', 'Fantasy door unmistakable brass lever handle', 'Door cover recessed panel', 'reward.coverPivot.add(keySlots.book)', 'infectionElapsed >= 11', 'startAtReward()', 'Single compressed brass library key', 'Elevator panel lower key slot', 'Library light switch key slot', 'Fantasy book key slot', 'toggleDoors()']) {
   if (!elevatorLibrarySource.includes(token)) throw new Error(`Missing elevator library feature: ${token}`)
 }
-for (const token of ["['left', 'right', 'center', 'right', 'left', 'center']", "'success-flash'", "'blackout'", "'blackout-deadline'", 'LIBRARY_BLACKOUT_ROW_SECONDS', 'LIBRARY_SURVIVAL_RESTORE_SECONDS', 'resolveLibraryEscape', 'rewardVisible', 'rewardOpened']) {
+for (const token of ["['left', 'right', 'center', 'right', 'left', 'center']", "'success-flash'", "'blackout'", "'blackout-deadline'", 'LIBRARY_BLACKOUT_ROW_SECONDS', 'LIBRARY_SURVIVAL_RESTORE_SECONDS', 'resolveLibraryEscape', 'rewardVisible', 'rewardOpened', "keyOwner: 'floor'", 'toggleLibraryKeySlot', 'canUseLibraryControl']) {
   if (!libraryPuzzleSource.includes(token)) throw new Error(`Missing library puzzle feature: ${token}`)
 }
 for (const token of ['createPoolWaterMaterial', 'createPoolCausticsMaterial', 'windowMask', 'gerstnerWave', 'p.xz +=', 'vWorldNormal', 'lightningArc', 'electricFbm', 'branchPath', 'resolvePoolMove', 'resolveShortestAngle', 'PoolWaterSurface', 'DataTexture', 'Pool Tyndall haze', 'Reflector', 'Clear pool ceiling mirror', 'textureWidth: 384', 'Pool puzzle half-height ladder', 'POOL_DUCKS', 'rotateDuck(duckId)', 'isLadderReady', 'televisionBank', 'ignoreInteractionOcclusion', 'Whole pool television interaction anchor', "'#ff0000'"]) {

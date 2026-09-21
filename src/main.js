@@ -72,6 +72,8 @@ const doorKeypadDialog = document.querySelector('.bar-scene__door-keypad')
 const initialScene = getInitialScene(location.pathname)
 const directHorror = initialScene === 'horror' || initialScene === 'horror-after-pool'
 const directHorrorAfterPool = initialScene === 'horror-after-pool'
+const directLibraryAfterSurvival = initialScene === 'library-after-survival'
+const directNonBar = directHorror || directLibraryAfterSurvival
 const touchMode = matchMedia('(pointer: coarse)').matches
 const maxDpr = touchMode ? 1.25 : 1.5
 
@@ -128,6 +130,9 @@ moonShadow.shadow.mapSize.set(1024, 1024)
 scene.add(moonShadow, moonShadow.target)
 
 const camera = new THREE.PerspectiveCamera(58, 1, .05, 50)
+// Camera-attached held objects must render even on direct /hr2 and /hr3
+// routes, where the bar glass setup never runs to add the camera for us.
+scene.add(camera)
 const EYE_HEIGHT = 1.75
 const MAX_PITCH = THREE.MathUtils.degToRad(70)
 const roomBounds = { minX: -3.72, maxX: 3.72, minZ: -2.72, maxZ: 2.72 }
@@ -709,13 +714,32 @@ function performInteraction(target = interactionTarget) {
     if (electrical.phase === 'countdown') status.textContent = '电视启动：5 秒后池水通电'
   }
   if (target.type === 'pool-float' && poolController) usePoolFloat()
+  if (target.type === 'library-key' && elevatorController) {
+    if (elevatorController.pickupKey()) status.textContent = '你捡起了电梯地板上的黄铜钥匙'
+  }
+  if (target.type === 'library-key-slot' && elevatorController) {
+    const owner = elevatorController.toggleKeySlot(target.slotId)
+    if (owner === 'held') status.textContent = '你拔出钥匙，重新拿在右手中'
+  }
   if (target.type === 'elevator-open' && elevatorController) {
+    if (elevatorController.keyOwner === 'held') {
+      elevatorController.toggleKeySlot('elevator-panel')
+      status.textContent = '你把右手中的钥匙插入操作板空白处的锁孔'
+      return
+    }
     const door = elevatorController.toggleDoors()
-    if (door) status.textContent = door.opening ? '电梯门缓慢打开' : '电梯门缓慢关闭'
+    if (door?.locked) status.textContent = '电梯门被锁住了。先取回黄铜钥匙，再点击操作板插入'
+    else if (door) status.textContent = door.opening ? '电梯门缓慢打开' : '电梯门缓慢关闭'
   }
   if (target.type === 'library-light-switch' && elevatorController) {
+    if (elevatorController.keyOwner === 'held') {
+      elevatorController.toggleKeySlot('light-switch')
+      status.textContent = '你把右手中的钥匙插入灯控面板锁孔'
+      return
+    }
     const puzzle = elevatorController.toggleLibraryLights()
-    if (puzzle.phase === 'eye-sequence') status.textContent = '灯灭了。书架深处有什么东西正在依次睁眼……'
+    if (puzzle.locked) status.textContent = '灯控面板被锁住了。先取回黄铜钥匙，再点击面板插入'
+    else if (puzzle.phase === 'eye-sequence') status.textContent = '灯灭了。书架深处有什么东西正在依次睁眼……'
     else if (puzzle.phase === 'awaiting-input') status.textContent = '依照刚才眼睛出现的顺序，抽出或放回对应的书'
     else if (puzzle.phase === 'reward') status.textContent = '灯重新亮起，桌上凭空多出了一本画着门的书'
     else status.textContent = puzzle.lightsOn ? '图书馆顶灯亮起' : '图书馆顶灯熄灭'
@@ -728,7 +752,13 @@ function performInteraction(target = interactionTarget) {
     else if (result) status.textContent = result.pulled ? '你从书架中抽出了一本书' : '你把书推回了原位'
   }
   if (target.type === 'library-reward-book' && elevatorController) {
-    if (elevatorController.openRewardBook()) status.textContent = '封面缓缓翻开，门的图案仿佛通向书页深处'
+    if (elevatorController.keyOwner === 'held') {
+      elevatorController.toggleKeySlot('book')
+      status.textContent = '你把右手中的钥匙插入奇幻书的锁孔'
+      return
+    }
+    if (elevatorController.openRewardBook()) status.textContent = '封皮连同钥匙向左翻开，书中的眼睛开始向整间图书馆蔓延'
+    else if (!elevatorController.canUseControl('reward-book')) status.textContent = '奇幻书的锁孔需要那把黄铜钥匙'
   }
   if (target.type === 'door-card-slot') {
     const nextState = insertCiderCard(gameState)
@@ -959,8 +989,9 @@ function activatePoolRoom(portalId) {
   applyLook()
 }
 
-function activateElevatorLibrary(portalId) {
+function activateElevatorLibrary(portalId, { rewardStart = false } = {}) {
   const root = portalLifecycle.getRoot(portalId)
+  if (rewardStart) elevatorController.startAtReward()
   elevatorMode = true
   elevatorDeathPending = false
   poolMode = false
@@ -981,14 +1012,17 @@ function activateElevatorLibrary(portalId) {
   renderer.shadowMap.autoUpdate = true
   host.classList.remove('is-horror', 'is-pool', 'is-electrified')
   host.classList.add('is-elevator-library')
-  status.textContent = '电梯抵达了未知楼层'
+  status.textContent = rewardStart ? '' : '电梯抵达了未知楼层'
   portalState = finishPortalEntry(portalState, portalId)
   registerInteraction({
     type: 'elevator-open',
     object: elevatorController.openButton,
     maxDistance: 2.35,
     ignoreOcclusion: true,
-    get prompt() { return elevatorController.doorsOpen ? '点击关闭电梯门' : '点击打开电梯门' },
+    get prompt() {
+      if (elevatorController.keyOwner !== 'elevator-panel') return '点击插入钥匙'
+      return elevatorController.doorsOpen ? '点击关闭电梯门' : '点击打开电梯门'
+    },
     get disabled() {
       const inFrontOfPanel = camera.position.z >= 3.05 && Math.abs(camera.position.x) <= 1.18
       const inDoorway = camera.position.z < 3.25 && camera.position.z >= 2.55 && Math.abs(camera.position.x) <= .82
@@ -996,9 +1030,32 @@ function activateElevatorLibrary(portalId) {
     },
   }, elevatorController.openButton.userData.interactionSize.toArray())
   registerInteraction({
+    type: 'library-key',
+    object: elevatorController.brassKey,
+    prompt: '点击拾取黄铜钥匙',
+    get disabled() { return elevatorController.keyOwner !== 'floor' },
+  }, [.62, .16, .3])
+  for (const [slotId, object] of Object.entries(elevatorController.keySlots)) registerInteraction({
+    type: 'library-key-slot',
+    slotId,
+    object,
+    ignoreOcclusion: true,
+    maxDistance: 2.2,
+    prompt: '点击拔出钥匙',
+    get disabled() {
+      return elevatorController.keyOwner !== slotId
+    },
+  }, [.18, .2, .18], slotId === 'elevator-panel'
+    ? [0, 0, -.2]
+    : slotId === 'book' ? [0, 0, .12] : [0, 0, -.12])
+  registerInteraction({
     type: 'library-light-switch',
     object: elevatorController.lightSwitch,
-    prompt: '点击拨动图书馆灯光开关',
+    get prompt() {
+      return elevatorController.keyOwner === 'light-switch'
+        ? '点击拨动图书馆灯光开关'
+        : '点击插入钥匙'
+    },
   }, [.4, .52, .24])
   for (const book of elevatorController.pullableBooks) registerInteraction({
     type: 'library-book',
@@ -1009,7 +1066,9 @@ function activateElevatorLibrary(portalId) {
   registerInteraction({
     type: 'library-reward-book',
     object: elevatorController.rewardBook,
-    prompt: '点击翻开画着门的书',
+    get prompt() {
+      return elevatorController.keyOwner === 'book' ? '点击翻开画着门的书' : '点击插入钥匙'
+    },
     get disabled() {
       const puzzle = elevatorController.getPuzzleState()
       return !puzzle.rewardVisible || puzzle.rewardOpened
@@ -1174,14 +1233,25 @@ portalLifecycle = createPortalLifecycle({
     const config = PORTALS.find(({ id }) => id === portalId)
     if (!config) throw new Error(`Unknown portal: ${portalId}`)
     if (portalId === PORTALS[1].id) {
-      const [elevatorGltf, bookshelfGltf, ceilingGltf, eyeTexture] = await Promise.all([
+      const [elevatorGltf, bookshelfGltf, ceilingGltf, doorGltf, eyeGltf, keyGltf, eyeTexture] = await Promise.all([
         roomLoader.loadAsync(config.modelUrl, onProgress),
         roomLoader.loadAsync(config.bookshelfUrl),
         roomLoader.loadAsync(config.ceilingUrl),
+        roomLoader.loadAsync(config.woodDoorUrl),
+        roomLoader.loadAsync(config.eyeModelUrl),
+        roomLoader.loadAsync(config.keyUrl),
         new THREE.TextureLoader().loadAsync(config.eyeUrl),
       ])
+      const keyHandAnchor = new THREE.Group()
+      keyHandAnchor.name = 'Library key right hand anchor'
+      keyHandAnchor.position.set(.11, -.23, -.58)
+      keyHandAnchor.rotation.set(-.08, -.18, -.12)
+      camera.add(keyHandAnchor)
       const elevatorCage = elevatorGltf.scene.getObjectByName('ElevatorCage_11') ?? elevatorGltf.scene
-      elevatorController = prepareElevatorLibrary(elevatorCage, bookshelfGltf.scene, ceilingGltf.scene, eyeTexture)
+      elevatorController = prepareElevatorLibrary(
+        elevatorCage, bookshelfGltf.scene, ceilingGltf.scene, eyeTexture, doorGltf.scene, eyeGltf.scene,
+        keyGltf.scene, keyHandAnchor,
+      )
       return elevatorController.root
     }
     const [gltf, televisionGltf] = await Promise.all([
@@ -1222,7 +1292,23 @@ if (directHorror) {
   })
 }
 
-if (!directHorror) roomLoader.load('/models/cozy_bar_v008-e4ad253c.glb', (gltf) => {
+if (directLibraryAfterSurvival) {
+  const portalId = PORTALS[1].id
+  portalState = unlockPortal(portalState, portalId)
+  portalState = requestPortalPreload(portalState, portalId)
+  status.textContent = ''
+  portalLifecycle.preload(portalId).then(() => {
+    portalState = resolvePortalPreload(portalState, portalId)
+    portalLifecycle.setCurrentRoots([ambientLight, ...webLights, moonShadow, moonShadow.target])
+    if (portalLifecycle.transition(portalId, {
+      clearCollections: [interactionHitObjects, occlusionObjects, floorTargets],
+    })) activateElevatorLibrary(portalId, { rewardStart: true })
+  }).catch(() => {
+    status.textContent = 'Yog-Sothoth 图书馆载入失败'
+  })
+}
+
+if (!directNonBar) roomLoader.load('/models/cozy_bar_v008-e4ad253c.glb', (gltf) => {
   barRoot = gltf.scene
   scene.add(barRoot)
   barRoot.traverse((object) => {
@@ -1287,7 +1373,7 @@ if (!directHorror) roomLoader.load('/models/cozy_bar_v008-e4ad253c.glb', (gltf) 
   status.textContent = '场景载入失败'
 })
 
-if (!directHorror) createGlassProp(scene, camera).then((controller) => {
+if (!directNonBar) createGlassProp(scene, camera).then((controller) => {
   glassProp = controller
   revealedNoteHandModel = glassProp.createRevealedNoteModel()
   revealedNoteHandModel.name = 'RevealedNoteHandModel'
@@ -1322,7 +1408,7 @@ if (!directHorror) createGlassProp(scene, camera).then((controller) => {
   status.textContent = '互动道具载入失败'
 })
 
-if (!directHorror) createTvProp(scene).then((controller) => {
+if (!directNonBar) createTvProp(scene).then((controller) => {
   if (horrorMode) {
     controller.dispose()
     return
@@ -1486,7 +1572,7 @@ renderer.setAnimationLoop(() => {
   }
   if (elevatorMode && elevatorController) {
     const previousPhase = elevatorController.getPuzzleState().phase
-    elevatorController.update(deltaTime)
+    elevatorController.update(deltaTime, camera.position)
     updateLibraryThreat()
     const currentPhase = elevatorController.getPuzzleState().phase
     if (previousPhase === 'success-flash' && currentPhase === 'blackout') {
@@ -1494,6 +1580,12 @@ renderer.setAnimationLoop(() => {
     }
     if (previousPhase === 'survived' && currentPhase === 'reward') {
       status.textContent = '电梯灯恢复稳定。门外所有灯管亮成血红色，现在可以开门了'
+    }
+    if (elevatorController.consumeExitRequest() && !televisionTransition.running) {
+      televisionTransition.run(() => {
+        status.textContent = '你眨了两次眼。手术室的入口尚未稳定，眼前仍是图书馆'
+        return true
+      })
     }
   }
   glassProp?.update(deltaTime)

@@ -6,12 +6,15 @@ import {
   LIBRARY_SURVIVAL_RESTORE_SECONDS,
   LIBRARY_BOOK_SEQUENCE,
   LIBRARY_EYE_SEQUENCE,
+  canUseLibraryControl,
   createLibraryPuzzleState,
   getLibraryLightRowLevels,
   openLibraryRewardBook,
+  pickupLibraryKey,
   recordLibraryBookAction,
   resolveLibraryEscape,
   toggleLibraryPuzzleLights,
+  toggleLibraryKeySlot,
   updateLibraryPuzzle,
 } from './library-puzzle.js'
 
@@ -69,6 +72,7 @@ test('a wrong book resets input, then success starts a far-to-near three-row bla
   state = updateLibraryPuzzle(state, LIBRARY_SURVIVAL_RESTORE_SECONDS)
   assert.equal(state.phase, 'reward')
   assert.equal(state.rewardVisible, true)
+  state = { ...state, keyOwner: 'book' }
   state = openLibraryRewardBook(state)
   assert.equal(state.rewardOpened, true)
 })
@@ -81,8 +85,32 @@ test('missing the elevator deadline produces a failed state and reset restores t
   assert.deepEqual(createLibraryPuzzleState(), {
     phase: 'idle', lightsOn: true, elapsed: 0, eyeTarget: null, eyeVisible: false,
     eyeStep: -1, inputIndex: 0, rewardVisible: false, rewardOpened: false,
-    blackoutProgress: 0,
+    blackoutProgress: 0, keyOwner: 'floor',
   })
+})
+
+test('one floor key moves between hand and the three exclusive locks', () => {
+  let state = createLibraryPuzzleState()
+  assert.equal(canUseLibraryControl(state, 'elevator-door'), false)
+  state = pickupLibraryKey(state)
+  assert.equal(state.keyOwner, 'held')
+  state = toggleLibraryKeySlot(state, 'elevator-panel')
+  assert.equal(canUseLibraryControl(state, 'elevator-door'), true)
+  assert.equal(canUseLibraryControl(state, 'library-light'), false)
+  state = toggleLibraryKeySlot(state, 'elevator-panel')
+  state = toggleLibraryKeySlot(state, 'light-switch')
+  assert.equal(canUseLibraryControl(state, 'library-light'), true)
+  state = toggleLibraryKeySlot(state, 'light-switch')
+  state = toggleLibraryKeySlot(state, 'book')
+  assert.equal(canUseLibraryControl(state, 'reward-book'), true)
+})
+
+test('the fantasy door book cannot open until the key is inserted', () => {
+  let state = { ...createLibraryPuzzleState(), phase: 'reward', rewardVisible: true, keyOwner: 'held' }
+  assert.strictEqual(openLibraryRewardBook(state), state)
+  state = toggleLibraryKeySlot(state, 'book')
+  state = openLibraryRewardBook(state)
+  assert.equal(state.rewardOpened, true)
 })
 
 test('the blackout window permits walking from the farthest shelf and closing the doors', () => {

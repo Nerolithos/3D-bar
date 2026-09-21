@@ -23,6 +23,7 @@ test('second television has its own locked Yog-Sothoth portal', () => {
   assert.equal(PORTALS[1].id, 'library-02')
   assert.equal(PORTALS[1].screenName, 'CRTScreen_07')
   assert.match(PORTALS[1].previewUrl, /portal-yog-sothoth-[a-f0-9]{8}\.jpg$/)
+  assert.match(PORTALS[1].eyeModelUrl, /eye-[a-f0-9]{8}\.glb$/)
   assert.equal(createPortalState()['library-02'].status, 'locked')
 })
 

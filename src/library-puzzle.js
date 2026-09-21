@@ -22,6 +22,7 @@ export function createLibraryPuzzleState() {
     rewardVisible: false,
     rewardOpened: false,
     blackoutProgress: 0,
+    keyOwner: 'floor',
   }
 }
 
@@ -135,7 +136,25 @@ export function recordLibraryBookAction(state, bookId) {
 }
 
 export function openLibraryRewardBook(state) {
-  return state.phase === 'reward' && state.rewardVisible && !state.rewardOpened
+  return state.phase === 'reward' && state.rewardVisible && !state.rewardOpened && state.keyOwner === 'book'
     ? { ...state, rewardOpened: true }
     : state
+}
+
+export function pickupLibraryKey(state) {
+  return state.keyOwner === 'floor' ? { ...state, keyOwner: 'held' } : state
+}
+
+export function toggleLibraryKeySlot(state, slotId) {
+  if (!['elevator-panel', 'light-switch', 'book'].includes(slotId)) return state
+  if (state.keyOwner === 'held') return { ...state, keyOwner: slotId }
+  if (state.keyOwner === slotId) return { ...state, keyOwner: 'held' }
+  return state
+}
+
+export function canUseLibraryControl(state, controlId) {
+  if (controlId === 'elevator-door') return state.keyOwner === 'elevator-panel'
+  if (controlId === 'library-light') return state.keyOwner === 'light-switch'
+  if (controlId === 'reward-book') return state.keyOwner === 'book'
+  return false
 }

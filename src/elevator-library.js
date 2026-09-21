@@ -1,11 +1,14 @@
 import * as THREE from 'three'
 import {
   createLibraryPuzzleState,
+  canUseLibraryControl,
   getLibraryLightRowLevels,
   openLibraryRewardBook,
+  pickupLibraryKey,
   recordLibraryBookAction,
   resolveLibraryEscape,
   toggleLibraryPuzzleLights,
+  toggleLibraryKeySlot,
   updateLibraryPuzzle,
 } from './library-puzzle.js'
 
@@ -13,6 +16,9 @@ export const ELEVATOR_MODEL_URL = '/models/elevator-b6e14779.glb'
 export const BOOKSHELF_MODEL_URL = '/models/bookshelf-1651bc85.glb'
 export const CEILING_MODEL_URL = '/models/ceiling-ab0e0502.glb'
 export const EYE_TEXTURE_URL = '/textures/library-eye-4e4953f6.webp'
+export const WOOD_DOOR_MODEL_URL = '/models/wood_door-68fb2c4e.glb'
+export const EYE_MODEL_URL = '/models/eye-7bc5b3e3.glb'
+export const KEY_MODEL_URL = '/models/key-b07613f7.glb'
 
 const ELEVATOR_BOUNDS = Object.freeze({ minX: -1.08, maxX: 1.08, minZ: 3.25, maxZ: 5.55 })
 const LIBRARY_BOUNDS = Object.freeze({ minX: -6.25, maxX: 6.25, minZ: -14.2, maxZ: 5.75 })
@@ -237,29 +243,156 @@ function removeSourceBookOverlap(sourceBooks, interactiveBook) {
   sourceBooks.name = `${sourceBooks.name} with interactive book clearance`
 }
 
-function createDoorBook(wood, pageMaterial, detailMaterial) {
+function createFantasyDoorBook(doorSource, coverMaterial, pageMaterial, detailMaterial) {
   const root = new THREE.Group()
-  root.name = 'Library reward door book'
+  root.name = 'Library fantasy door book'
   root.position.set(0, 1.16, -7.3)
-  const pages = box(root, 'Door book page block', [.48, .075, .64], [0, 0, 0], pageMaterial)
+  const pages = box(root, 'Fantasy book thick page block', [.84, .15, 1.02], [0, 0, 0], pageMaterial)
   pages.castShadow = true
-  box(root, 'Door book lower cover', [.53, .025, .69], [0, -.05, 0], wood)
+  box(root, 'Fantasy book lower cover', [.94, .035, 1.12], [0, -.095, 0], coverMaterial)
+  box(root, 'Fantasy book left spine', [.07, .21, 1.1], [-.455, -.005, 0], coverMaterial)
+  for (const z of [-.46, .46]) {
+    box(root, 'Fantasy book gold corner', [.16, .025, .11], [-.35, .1, z], detailMaterial)
+    box(root, 'Fantasy book gold corner', [.16, .025, .11], [.35, .1, z], detailMaterial)
+  }
+
   const coverPivot = new THREE.Group()
-  coverPivot.name = 'Door book opening cover pivot'
-  coverPivot.position.set(0, .055, -.345)
+  coverPivot.name = 'Fantasy door cover left hinge'
+  coverPivot.position.set(-.43, .11, 0)
   root.add(coverPivot)
-  box(coverPivot, 'Door book cover', [.53, .028, .69], [0, 0, .345], wood)
-  box(coverPivot, 'Door symbol panel', [.22, .018, .34], [0, .025, .35], detailMaterial)
-  box(coverPivot, 'Door symbol left frame', [.025, .022, .39], [-.14, .03, .35], detailMaterial)
-  box(coverPivot, 'Door symbol right frame', [.025, .022, .39], [.14, .03, .35], detailMaterial)
-  box(coverPivot, 'Door symbol lintel', [.3, .022, .025], [0, .03, .155], detailMaterial)
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(.018, 8, 6), pageMaterial)
-  knob.name = 'Door symbol knob'
-  knob.position.set(.065, .045, .35)
-  coverPivot.add(knob)
+  box(coverPivot, 'Door cover leather backing', [.88, .035, 1.08], [.43, 0, 0], coverMaterial)
+  const doorWood = new THREE.MeshStandardMaterial({
+    name: 'Fantasy cover carved door wood', color: 0x54220f, roughness: .7, metalness: .04,
+  })
+  const doorRecess = new THREE.MeshStandardMaterial({
+    name: 'Fantasy cover recessed door wood', color: 0x281008, roughness: .83,
+  })
+  const fallbackDoorSource = new THREE.Group()
+  fallbackDoorSource.add(new THREE.Mesh(sharedBoxGeometry([.72, 1, .12]), doorWood))
+  const usableDoorSource = doorSource.getObjectByProperty('isMesh', true) ? doorSource : fallbackDoorSource
+  const doorModel = normalizedClone(usableDoorSource, .91, 'Compressed wood door cover')
+  doorModel.position.set(.43, .045, 0)
+  doorModel.rotation.x = Math.PI / 2
+  doorModel.scale.x = 1.13
+  doorModel.traverse((object) => {
+    if (!object.isMesh) return
+    object.material = doorWood
+    object.castShadow = true
+    object.receiveShadow = true
+  })
+  coverPivot.add(doorModel)
+
+  // A readable miniature door: full frame, recessed panels, hinges and a
+  // projecting lever handle remain recognizable even in the dim library.
+  for (const x of [.075, .785]) box(coverPivot, 'Door cover raised side frame', [.06, .065, .98], [x, .075, 0], doorWood)
+  for (const z of [-.46, .46]) box(coverPivot, 'Door cover raised top bottom frame', [.77, .065, .06], [.43, .075, z], doorWood)
+  for (const zCenter of [-.23, .22]) {
+    box(coverPivot, 'Door cover recessed panel', [.53, .022, .32], [.43, .075, zCenter], doorRecess)
+    for (const x of [.155, .705]) box(coverPivot, 'Door cover panel vertical molding', [.035, .045, .36], [x, .095, zCenter], doorWood)
+    for (const z of [zCenter - .18, zCenter + .18]) box(coverPivot, 'Door cover panel horizontal molding', [.585, .045, .035], [.43, .095, z], doorWood)
+  }
+  for (const z of [-.32, .32]) {
+    const hinge = new THREE.Mesh(new THREE.CylinderGeometry(.018, .018, .15, 10), detailMaterial)
+    hinge.name = 'Fantasy door visible brass hinge'
+    hinge.position.set(.105, .12, z)
+    hinge.rotation.x = Math.PI / 2
+    coverPivot.add(hinge)
+  }
+  const handle = new THREE.Group()
+  handle.name = 'Fantasy door unmistakable brass lever handle'
+  handle.position.set(.65, .13, .04)
+  const escutcheon = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, .022, 18), detailMaterial)
+  escutcheon.name = 'Fantasy door handle round backplate'
+  const spindle = new THREE.Mesh(new THREE.CylinderGeometry(.021, .021, .065, 12), detailMaterial)
+  spindle.position.y = .038
+  const lever = new THREE.Mesh(new THREE.CapsuleGeometry(.022, .12, 4, 8), detailMaterial)
+  lever.position.set(-.07, .075, 0)
+  lever.rotation.z = Math.PI / 2
+  handle.add(escutcheon, spindle, lever)
+  coverPivot.add(handle)
+
   root.visible = false
   root.userData.opened = false
+  root.traverse((object) => { object.userData.ignoreInteractionOcclusion = true })
   return { root, coverPivot }
+}
+
+function createEyeInfection(eyeSource) {
+  const fallback = new THREE.Mesh(
+    new THREE.SphereGeometry(.5, 12, 8),
+    new THREE.MeshPhysicalMaterial({ color: 0xd9c4b8, roughness: .25, clearcoat: .8 }),
+  )
+  const sourceMesh = eyeSource.getObjectByProperty('isMesh', true) ?? fallback
+  eyeSource.updateMatrixWorld(true)
+  const geometry = sourceMesh.geometry.clone().applyMatrix4(sourceMesh.matrixWorld)
+  geometry.computeBoundingBox()
+  const bounds = geometry.boundingBox
+  const center = bounds.getCenter(new THREE.Vector3())
+  const size = bounds.getSize(new THREE.Vector3())
+  geometry.translate(-center.x, -center.y, -center.z)
+  const normalization = 1 / Math.max(size.x, size.y, size.z, .001)
+  geometry.scale(normalization, normalization, normalization)
+  geometry.computeVertexNormals()
+  const sourceMaterial = Array.isArray(sourceMesh.material) ? sourceMesh.material[0] : sourceMesh.material
+  const eyeMaterial = sourceMaterial.clone()
+  eyeMaterial.name = 'Compressed eye.glb shared infection material'
+
+  const placements = []
+  const add = (x, y, z, radius, delay) => placements.push({ position: new THREE.Vector3(x, y, z), radius, delay })
+  const distanceScaledRadius = (x, z, base = .095) => {
+    const distanceFromBook = Math.hypot(x, z + 7.3)
+    return base + Math.min(.17, distanceFromBook * .014)
+  }
+  // Dense three-dimensional mound entirely inside the open page cavity.
+  for (let index = 0; index < 52; index += 1) {
+    const angle = index * 2.399963
+    const radial = .025 + .325 * Math.sqrt(index / 51)
+    add(
+      Math.cos(angle) * radial,
+      1.275 + (1 - radial / .36) * .205 + (index % 4) * .018,
+      -7.3 + Math.sin(angle) * radial * 1.18,
+      .055 + ((index * 7) % 11) * .01,
+      index * .016,
+    )
+  }
+  // The infection advances from the reward table to every table and shelf bank.
+  let infectionIndex = 0
+  for (const tableZ of [-7.3, -10.7, -3.9]) for (const x of [-1.38, -.92, -.46, 0, .46, .92, 1.38]) {
+    const z = tableZ + ((infectionIndex % 3) - 1) * .22
+    add(x, 1.14, z, distanceScaledRadius(x, z, .085) + infectionIndex % 3 * .012, 1.6 + infectionIndex++ * .072)
+  }
+  for (const x of [-5.25, -2.65, 0, 2.65, 5.25]) for (const y of [.55, 1.28, 2.05, 2.72]) {
+    const eyeX = x + Math.sin(infectionIndex) * .22
+    add(eyeX, y, -14.02, distanceScaledRadius(eyeX, -14.02, .11), 2.4 + infectionIndex++ * .075)
+  }
+  for (const side of [-1, 1]) for (const z of [-12.1, -9.25, -6.4, -3.55, -.7]) for (const y of [.72, 1.65, 2.55]) {
+    const eyeZ = z + Math.cos(infectionIndex) * .2
+    add(side * 6.02, y, eyeZ, distanceScaledRadius(side * 6.02, eyeZ, .115), 3.1 + infectionIndex++ * .065)
+  }
+  const eyes = new THREE.InstancedMesh(geometry, eyeMaterial, placements.length)
+  eyes.name = 'Instanced eye.glb spreading infection'
+  eyes.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+  eyes.castShadow = true
+  eyes.receiveShadow = true
+  eyes.frustumCulled = false
+  eyes.visible = false
+  const dummy = new THREE.Object3D()
+  const fallbackTarget = new THREE.Vector3(0, 1.7, 0)
+  const update = (infectionElapsed, viewerPosition = fallbackTarget) => {
+    eyes.visible = infectionElapsed >= 0
+    for (const [index, placement] of placements.entries()) {
+      const progress = THREE.MathUtils.smoothstep(infectionElapsed, placement.delay, placement.delay + 1.15)
+      const pulse = 1 + Math.sin(infectionElapsed * 1.35 + index * .71) * .035
+      dummy.position.copy(placement.position)
+      dummy.lookAt(viewerPosition)
+      dummy.scale.setScalar(placement.radius * progress * pulse)
+      dummy.updateMatrix()
+      eyes.setMatrixAt(index, dummy.matrix)
+    }
+    eyes.instanceMatrix.needsUpdate = true
+  }
+  update(-1)
+  return { eyes, placements, update }
 }
 
 function normalizedCeilingLight(source) {
@@ -290,15 +423,71 @@ function createTableSet(wood, darkWood, bookMaterials, index) {
   }
   const bookCount = index === 1 ? 3 : 2
   for (let bookIndex = 0; bookIndex < bookCount; bookIndex += 1) {
+    const bookX = index === 1 && bookIndex === 2 ? .92 : -.55 + bookIndex * .58
     const book = box(group, 'Book resting on table', [.48, .055, .34],
-      [-.55 + bookIndex * .58, 1.13 + bookIndex * .025, -.12 + (bookIndex % 2) * .24],
+      [bookX, 1.13, -.12 + (bookIndex % 2) * .24],
       bookMaterials[(index + bookIndex) % bookMaterials.length])
     book.rotation.y = -.18 + bookIndex * .13
   }
   return group
 }
 
-export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingSource, eyeTexture = null) {
+function createBrassKey(source, detailMaterial) {
+  const key = new THREE.Group()
+  key.name = 'Single compressed brass library key'
+  const content = source.getObjectByProperty('isMesh', true)
+    ? source.clone(true)
+    : new THREE.Mesh(sharedBoxGeometry([.34, .055, .025]), detailMaterial)
+  key.add(content)
+  key.updateMatrixWorld(true)
+  const bounds = new THREE.Box3().setFromObject(content)
+  const size = bounds.getSize(new THREE.Vector3())
+  const center = bounds.getCenter(new THREE.Vector3())
+  const scale = .22 / Math.max(size.x, size.y, size.z, .001)
+  content.scale.multiplyScalar(scale)
+  content.position.copy(center).multiplyScalar(-scale)
+  content.traverse((object) => {
+    if (!object.isMesh) return
+    object.material = detailMaterial
+    object.castShadow = true
+    object.receiveShadow = true
+  })
+  key.traverse((object) => { object.userData.ignoreInteractionOcclusion = true })
+  return key
+}
+
+function createKeySlot(name, position, rotation, detailMaterial) {
+  const slot = new THREE.Group()
+  slot.name = name
+  slot.position.fromArray(position)
+  slot.rotation.fromArray(rotation)
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(.055, .012, 6, 12), detailMaterial)
+  rim.name = `${name} brass rim`
+  rim.scale.set(.78, .88, 1)
+  slot.add(rim)
+  const hole = new THREE.Mesh(
+    new THREE.CylinderGeometry(.022, .022, .018, 8),
+    new THREE.MeshBasicMaterial({ name: `${name} dark keyhole`, color: 0x090705 }),
+  )
+  hole.name = `${name} keyhole`
+  hole.rotation.x = Math.PI / 2
+  slot.add(hole)
+  const slit = box(slot, `${name} dark key slit`, [.017, .05, .014], [0, -.034, .002], hole.material)
+  slit.castShadow = false
+  slot.traverse((object) => { object.userData.ignoreInteractionOcclusion = true })
+  return slot
+}
+
+export function prepareElevatorLibrary(
+  elevatorSource,
+  bookshelfSource,
+  ceilingSource,
+  eyeTexture = null,
+  doorSource = new THREE.Group(),
+  eyeSource = new THREE.Group(),
+  keySource = new THREE.Group(),
+  heldKeyAnchor = null,
+) {
   const root = new THREE.Group()
   root.name = 'Yog-Sothoth elevator library'
   const wallMaterial = createWallpaperMaterial()
@@ -369,6 +558,7 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
 
   const modelControlPanel = elevatorModel.getObjectByName('ElevatorInteriorButtons_4') ?? null
   const openButton = new THREE.Object3D()
+  const panelKeySlotPosition = new THREE.Vector3(1.105, 1.2, 4.25)
   openButton.name = 'Native elevator panel interaction anchor'
   openButton.userData.ignoreInteractionOcclusion = true
   if (modelControlPanel) {
@@ -392,6 +582,11 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     // The panel faces inward from the right wall. Put the ray target just in
     // front of its visible face so the wall can never win the front-on ray.
     openButton.position.x = panelBounds.min.x - .16
+    panelKeySlotPosition.set(
+      panelBounds.min.x - .025,
+      panelBounds.min.y + panelSize.y * .28,
+      panelBounds.getCenter(new THREE.Vector3()).z + panelSize.z * .27,
+    )
     openButton.userData.interactionSize = new THREE.Vector3(
       .22,
       Math.max(1.22, panelSize.y * 1.28),
@@ -470,7 +665,8 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     addShelf(-6.3, z, Math.PI / 2, leftPullable)
     addShelf(6.3, z, -Math.PI / 2, rightPullable)
   }
-  root.add(createInstancedShelfUnits(shelfTemplate, staticShelfPlacements))
+  const instancedShelves = createInstancedShelfUnits(shelfTemplate, staticShelfPlacements)
+  root.add(instancedShelves)
   for (const [index, z] of [-10.7, -7.3, -3.9].entries()) {
     const table = createTableSet(wood, darkWood, bookMaterials, index)
     table.position.z = z
@@ -494,7 +690,10 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
   }
   const watchingEyes = {}
   for (const [side, position] of Object.entries(eyePositions)) {
-    const eye = new THREE.Sprite(eyeMaterial)
+    // Each eye needs independent opacity. Sharing one SpriteMaterial meant
+    // the last (center) eye overwrote the left/right alpha every frame.
+    const eye = new THREE.Sprite(eyeMaterial.clone())
+    eye.material.name = `Library watching eye glow ${side}`
     eye.name = `Library watching eye ${side}`
     eye.position.copy(position)
     eye.scale.set(.52, .34, 1)
@@ -506,8 +705,26 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
   eyeGlow.name = 'Library watching eye light'
   root.add(eyeGlow)
 
-  const reward = createDoorBook(bookMaterials[1], pageMaterial, bookDetailMaterial)
+  const reward = createFantasyDoorBook(doorSource, bookMaterials[1], pageMaterial, bookDetailMaterial)
   root.add(reward.root)
+  const eyeInfection = createEyeInfection(eyeSource)
+  root.add(eyeInfection.eyes)
+
+  const brassKey = createBrassKey(keySource, bookDetailMaterial)
+  root.add(brassKey)
+  const keySlots = {
+    'elevator-panel': createKeySlot(
+      'Elevator panel lower key slot', panelKeySlotPosition.toArray(), [0, Math.PI / 2, 0], bookDetailMaterial,
+    ),
+    'light-switch': createKeySlot(
+      'Library light switch key slot', [1.05, .99, 3.025], [0, 0, 0], bookDetailMaterial,
+    ),
+    book: createKeySlot('Fantasy book key slot', [.7, .155, .25], [-Math.PI / 2, 0, 0], bookDetailMaterial),
+  }
+  keySlots['elevator-panel'].scale.setScalar(.65)
+  keySlots['elevator-panel'].getObjectByName('Elevator panel lower key slot brass rim').scale.x = .58
+  root.add(keySlots['elevator-panel'], keySlots['light-switch'])
+  reward.coverPivot.add(keySlots.book)
 
   const fixtureTemplate = normalizedCeilingLight(ceilingSource)
   const ceilingFixtures = new THREE.Group()
@@ -577,26 +794,58 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
   let puzzleState = createLibraryPuzzleState()
   let elapsed = 0
   const bookMotionTarget = new THREE.Vector3()
+  let infectionElapsed = 0
+  let exitRequestPending = false
+  let exitRequestConsumed = false
   const leftClosedX = leftDoor.position.x
   const rightClosedX = rightDoor.position.x
+  const keyAxis = new THREE.Vector3(1, 0, 0)
+  const keySlotOutward = {
+    'elevator-panel': new THREE.Vector3(-1, 0, 0),
+    'light-switch': new THREE.Vector3(0, 0, -1),
+    book: new THREE.Vector3(0, 1, 0),
+  }
+  const syncKeyVisual = () => {
+    const owner = puzzleState.keyOwner
+    const targetParent = owner === 'held'
+      ? heldKeyAnchor
+      : owner === 'book' ? reward.coverPivot : root
+    if (targetParent && brassKey.parent !== targetParent) targetParent.add(brassKey)
+    brassKey.visible = owner !== 'held' || Boolean(heldKeyAnchor)
+    brassKey.scale.setScalar(1)
+    brassKey.rotation.set(0, 0, 0)
+    if (owner === 'held') {
+      brassKey.position.set(0, 0, 0)
+      brassKey.rotation.set(.12, -.18, -.18)
+      brassKey.scale.setScalar(1)
+    } else if (owner === 'floor') {
+      brassKey.position.set(.42, .055, 4.62)
+      brassKey.rotation.set(-Math.PI / 2, -.35, .08)
+    } else if (keySlotOutward[owner]) {
+      const outward = keySlotOutward[owner]
+      // The key's teeth are on its negative local X end. Push that end deeper
+      // into the surface while keeping the bow upright without a twist.
+      brassKey.position.copy(keySlots[owner].position).addScaledVector(outward, .06)
+      brassKey.quaternion.setFromUnitVectors(keyAxis, outward)
+    }
+  }
   const applyPuzzleVisuals = () => {
     libraryLightsOn = puzzleState.lightsOn
     const rowLevels = getLibraryLightRowLevels(puzzleState)
     const averageLevel = rowLevels.reduce((sum, level) => sum + level, 0) / rowLevels.length
-    const bloodRed = puzzleState.phase === 'reward'
-    coldAmbient.color.setHex(bloodRed ? 0x5d0000 : 0x8f9da6)
-    coldAmbient.groundColor.setHex(bloodRed ? 0x120000 : 0x15110e)
-    coldAmbient.intensity = puzzleState.phase === 'blackout' ? .12 + averageLevel * .34 : averageLevel * (bloodRed ? .82 : 1.42)
+    coldAmbient.color.setHex(0x8f9da6)
+    coldAmbient.groundColor.setHex(0x15110e)
+    coldAmbient.intensity = puzzleState.phase === 'blackout' ? .12 + averageLevel * .34 : averageLevel * 1.42
     for (const [rowIndex, row] of libraryLightRows.entries()) {
       const level = rowLevels[rowIndex]
       for (const diffuser of row.diffusers) {
         diffuser.material.emissiveIntensity = level * 2.2
-        diffuser.material.emissive.setHex(bloodRed ? 0xff0000 : 0xfff1ca)
-        diffuser.material.color.setHex(level > .05 ? (bloodRed ? 0xc20a05 : 0xf6f1df) : 0x454541)
+        diffuser.material.emissive.setHex(0xfff1ca)
+        diffuser.material.color.setHex(level > .05 ? 0xf6f1df : 0x454541)
       }
       for (const light of row.lights) {
-        light.color.setHex(bloodRed ? 0xff0800 : 0xffe5b5)
-        light.intensity = level * (bloodRed ? 21 : 18)
+        light.color.setHex(0xffe5b5)
+        light.intensity = level * 18
       }
     }
     switchLever.position.y = libraryLightsOn ? .035 : -.035
@@ -609,7 +858,10 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     }
     eyeGlow.intensity = 0
     reward.root.visible = puzzleState.rewardVisible
+    keySlots.book.visible = puzzleState.rewardVisible
+    syncKeyVisual()
   }
+  applyPuzzleVisuals()
   return {
     root,
     floor,
@@ -622,6 +874,9 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     pullableBooks,
     watchingEyes,
     rewardBook: reward.root,
+    eyeInfection: eyeInfection.eyes,
+    brassKey,
+    keySlots,
     get doorsOpen() { return doorProgress >= .985 },
     get doorsClosed() { return doorProgress <= .015 },
     get passageOpen() { return doorProgress >= .85 },
@@ -629,21 +884,24 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
     get doorsMoving() { return doorsMoving },
     get controlsLocked() { return puzzleState.phase === 'survived' },
     get libraryLightsOn() { return libraryLightsOn },
+    get keyOwner() { return puzzleState.keyOwner },
     getPuzzleState() { return { ...puzzleState } },
     openDoors() {
-      if (doorsMoving || doorTarget === 1) return false
+      if (!canUseLibraryControl(puzzleState, 'elevator-door') || doorsMoving || doorTarget === 1) return false
       doorTarget = 1
       doorsMoving = true
       return true
     },
     toggleDoors() {
       if (puzzleState.phase === 'survived') return null
+      if (!canUseLibraryControl(puzzleState, 'elevator-door')) return { locked: true, opening: doorTarget === 1 }
       // A second press reverses an in-progress movement instead of being lost.
       doorTarget = doorTarget === 1 ? 0 : 1
       doorsMoving = true
       return { opening: doorTarget === 1 }
     },
     toggleLibraryLights() {
+      if (!canUseLibraryControl(puzzleState, 'library-light')) return { ...puzzleState, locked: true }
       const previousPhase = puzzleState.phase
       puzzleState = toggleLibraryPuzzleLights(puzzleState)
       if (previousPhase === 'idle' && puzzleState.phase === 'eye-sequence') {
@@ -682,6 +940,29 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
       reward.root.userData.opened = true
       return true
     },
+    pickupKey() {
+      const next = pickupLibraryKey(puzzleState)
+      if (next === puzzleState) return false
+      puzzleState = next
+      syncKeyVisual()
+      return true
+    },
+    toggleKeySlot(slotId) {
+      const next = toggleLibraryKeySlot(puzzleState, slotId)
+      if (next === puzzleState) return false
+      puzzleState = next
+      syncKeyVisual()
+      return puzzleState.keyOwner
+    },
+    canUseControl(controlId) {
+      return canUseLibraryControl(puzzleState, controlId)
+    },
+    consumeExitRequest() {
+      if (!exitRequestPending || exitRequestConsumed) return false
+      exitRequestPending = false
+      exitRequestConsumed = true
+      return true
+    },
     resolveEscape(survived) {
       const next = resolveLibraryEscape(puzzleState, survived)
       if (next === puzzleState) return false
@@ -712,10 +993,37 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
         book.position.copy(book.userData.restPosition)
       }
       reward.root.userData.opened = false
-      reward.coverPivot.rotation.x = 0
+      reward.coverPivot.rotation.z = 0
+      eyeInfection.eyes.visible = false
+      eyeInfection.update(-1)
+      infectionElapsed = 0
+      exitRequestPending = false
+      exitRequestConsumed = false
       applyPuzzleVisuals()
     },
-    update(deltaTime) {
+    startAtReward() {
+      puzzleState = {
+        ...createLibraryPuzzleState(),
+        phase: 'reward',
+        lightsOn: true,
+        rewardVisible: true,
+        keyOwner: 'elevator-panel',
+      }
+      doorProgress = 0
+      doorTarget = 0
+      doorsMoving = false
+      leftDoor.position.x = leftClosedX
+      rightDoor.position.x = rightClosedX
+      reward.root.userData.opened = false
+      reward.coverPivot.rotation.z = 0
+      eyeInfection.eyes.visible = false
+      eyeInfection.update(-1)
+      infectionElapsed = 0
+      exitRequestPending = false
+      exitRequestConsumed = false
+      applyPuzzleVisuals()
+    },
+    update(deltaTime, viewerPosition = null) {
       elapsed += Math.min(deltaTime, .2)
       const nextPuzzleState = updateLibraryPuzzle(puzzleState, deltaTime)
       if (nextPuzzleState !== puzzleState) {
@@ -736,12 +1044,17 @@ export function prepareElevatorLibrary(elevatorSource, bookshelfSource, ceilingS
         book.position.x = THREE.MathUtils.damp(book.position.x, target.x, 10, deltaTime)
         book.position.z = THREE.MathUtils.damp(book.position.z, target.z, 10, deltaTime)
       }
-      reward.coverPivot.rotation.x = THREE.MathUtils.damp(
-        reward.coverPivot.rotation.x,
-        puzzleState.rewardOpened ? -2.55 : 0,
+      reward.coverPivot.rotation.z = THREE.MathUtils.damp(
+        reward.coverPivot.rotation.z,
+        puzzleState.rewardOpened ? -Math.PI : 0,
         5,
         deltaTime,
       )
+      if (puzzleState.rewardOpened) {
+        infectionElapsed += deltaTime
+        eyeInfection.update(infectionElapsed, viewerPosition ?? spawn.position)
+        if (infectionElapsed >= 11 && !exitRequestConsumed) exitRequestPending = true
+      }
       if (!doorsMoving) return
       doorProgress = THREE.MathUtils.damp(doorProgress, doorTarget, 2.8, deltaTime)
       leftDoor.position.x = leftClosedX - doorProgress * .9
